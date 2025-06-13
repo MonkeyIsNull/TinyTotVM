@@ -1,0 +1,41 @@
+PUSH_INT 10
+STORE x
+PUSH_INT 20
+STORE y
+LOAD x
+LOAD y
+ADD
+PRINT
+LOAD y
+LOAD x
+GT
+PRINT
+LOAD x
+LOAD y
+LT
+PRINT
+LOAD x
+LOAD y
+EQ
+JZ else_0
+PUSH_STR "Equal"
+PRINT
+JMP end_if_1
+LABEL else_0
+PUSH_STR "Not equal"
+PRINT
+LABEL end_if_1
+PUSH_INT 20
+STORE x
+LOAD x
+LOAD y
+EQ
+JZ else_2
+PUSH_STR "Now equal!"
+PRINT
+JMP end_if_3
+LABEL else_2
+PUSH_STR "Still not equal"
+PRINT
+LABEL end_if_3
+HALT

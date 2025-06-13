@@ -43,5 +43,45 @@ Int(3)
 Int(20)
 ```
 
+## Lisp InterOp
+
+Take a look at the example lisp code in examples/showcase.lisp
+
+Compile the lisp code to ttvm code
+```
+cargo run --bin tiny_tot_vm -- compile-lisp examples/showcase.lisp examples/showcase_lisp.ttvm
+```
+
+Then run the ttvm code
+```
+cargo run -- examples/showcase_lisp.ttvm
+```
+And you should get something along the lines of:
+```
+Int(30)
+Int(1)
+Int(1)
+Str("Not equal")
+Str("Now equal!")
+```
+
+To compile it to bytecode just:
+```
+ cargo run -- compile examples/showcase_lisp.ttvm sample_ttbs/showcase_lisp.ttb
+ ```
+
+ and then run them vm on the bytecode:
+ ```
+ cargo run -- sample_ttbs/showcase_lisp.ttb
+ ```
+
+ Again, you should get something like:
+ ```
+ Int(30)
+Int(1)
+Int(1)
+Str("Not equal")
+Str("Now equal!")
+```
 
 LICENSE: Free, as in free beer.
