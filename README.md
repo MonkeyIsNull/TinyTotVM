@@ -70,7 +70,7 @@ To compile it to bytecode just:
  cargo run -- compile examples/showcase_lisp.ttvm sample_ttbs/showcase_lisp.ttb
  ```
 
- and then run them vm on the bytecode:
+ and then run the vm on the bytecode:
  ```
  cargo run -- sample_ttbs/showcase_lisp.ttb
  ```
