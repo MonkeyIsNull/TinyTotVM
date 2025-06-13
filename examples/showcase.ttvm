@@ -1,0 +1,94 @@
+; === CORE OPS ===
+PUSH_STR "=== Core Ops ==="
+PRINT
+PUSH_INT 2
+PUSH_INT 3
+ADD
+PRINT
+PUSH_STR "Hello, "
+PUSH_STR "World!"
+CONCAT
+PRINT
+
+; === BOOLEANS & NULL ===
+PUSH_STR "=== Booleans & Null ==="
+PRINT
+TRUE
+FALSE
+AND
+PRINT
+TRUE
+NOT
+PRINT
+NULL
+PRINT
+
+; === COMPARISONS ===
+PUSH_STR "=== Comparisons ==="
+PRINT
+PUSH_INT 5
+PUSH_INT 5
+EQ
+PRINT
+PUSH_INT 3
+PUSH_INT 5
+LT
+PRINT
+PUSH_INT 10
+PUSH_INT 7
+GE
+PRINT
+
+; === VARIABLES ===
+PUSH_STR "=== Variables ==="
+PRINT
+PUSH_INT 42
+STORE my_var
+LOAD my_var
+PRINT
+DELETE my_var
+DUMPSCOPE
+
+; === CONTROL FLOW ===
+PUSH_STR "=== Control Flow ==="
+PRINT
+PUSH_INT 0
+JZ else_block
+
+PUSH_STR "In IF block"
+PRINT
+JMP end_if
+
+LABEL else_block
+PUSH_STR "In ELSE block"
+PRINT
+
+LABEL end_if
+PUSH_INT 0
+CALL show_call
+PRINT
+JMP skip_ret
+
+LABEL show_call
+PUSH_STR "Inside CALL"
+PRINT
+RET
+
+LABEL skip_ret
+
+; === LISTS ===
+PUSH_STR "=== Lists ==="
+PRINT
+PUSH_INT 10
+PUSH_INT 20
+PUSH_INT 30
+MAKELIST 3
+DUP
+LEN
+PRINT
+PUSH_INT 1
+INDEX
+PRINT
+
+HALT
+
