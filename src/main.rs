@@ -139,7 +139,7 @@ fn parse_program(path: &str) -> Vec<OpCode> {
 
     // First pass: build label -> index map
     for (line_num, line) in content.lines().enumerate() {
-        let line = line.trim();
+        let line = line.split(';').next().unwrap_or("").trim();
         if line.is_empty() {
             continue;
         }

@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "TinyTotVM"
+name = "tiny_tot_vm"
 version = "0.1.0"
