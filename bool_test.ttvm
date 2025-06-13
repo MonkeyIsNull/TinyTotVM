@@ -1,0 +1,15 @@
+TRUE
+NOT
+JZ false_branch
+
+PUSH_STR "True!"
+PRINT
+JMP end
+
+LABEL false_branch
+PUSH_STR "False!"
+PRINT
+
+LABEL end
+HALT
+

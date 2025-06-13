@@ -6,6 +6,9 @@ use std::collections::HashMap;
 enum Value {
     Int(i64),
     Str(String),
+    Bool(bool),
+    Null,
+    List(Vec<Value>),
 }
 
 #[derive(Debug)]
@@ -31,6 +34,11 @@ enum OpCode {
     Lt,
     Ge,
     Le,
+    True,
+    False,
+    Not,
+    And,
+    Or,
     DumpScope,
 }
 
@@ -84,16 +92,17 @@ impl VM {
                     continue;
                 }
                 OpCode::Jz(target) => {
-                    let val = self.stack.pop().expect("stack underflow");
-                    match val {
-                        Value::Int(0) => {
-                            self.ip = *target;
-                            continue;
-                        }
-                        Value::Int(_) => {} // no jump
-                        _ => panic!("JZ requires an integer"),
+                    let val = self.stack.pop().expect("stack underflow on JZ");
+                    let is_zero = match val {
+                        Value::Int(0) => true,
+                        Value::Bool(false) => true,
+                        _ => false,
+                    };
+                    if is_zero {
+                        self.ip = *target;
+                        continue;
                     }
-                }
+                }                
                 OpCode::Call(target) => {
                     self.call_stack.push(self.ip + 1);
                     self.variables.push(HashMap::new()); // push new scope
@@ -202,6 +211,35 @@ impl VM {
                         _ => panic!("LE requires two integers"),
                     }
                 }
+                OpCode::True => self.stack.push(Value::Bool(true)),
+                OpCode::False => self.stack.push(Value::Bool(false)),
+                OpCode::Not => {
+                    let val = self.stack.pop().expect("stack underflow on NOT");
+                    let result = match val {
+                        Value::Bool(b) => !b,
+                        Value::Int(i) => i == 0, // optional: treat 0 as false
+                        _ => panic!("NOT expects a Bool or Int"),
+                    };
+                    self.stack.push(Value::Bool(result));
+                }
+                OpCode::And => {
+                    let b = self.stack.pop().expect("stack underflow on AND");
+                    let a = self.stack.pop().expect("stack underflow on AND");
+                    let result = match (a, b) {
+                        (Value::Bool(x), Value::Bool(y)) => x && y,
+                        _ => panic!("AND expects two Booleans"),
+                    };
+                    self.stack.push(Value::Bool(result));
+                }
+                OpCode::Or => {
+                    let b = self.stack.pop().expect("stack underflow on OR");
+                    let a = self.stack.pop().expect("stack underflow on OR");
+                    let result = match (a, b) {
+                        (Value::Bool(x), Value::Bool(y)) => x || y,
+                        _ => panic!("OR expects two Booleans"),
+                    };
+                    self.stack.push(Value::Bool(result));
+                }
                 OpCode::DumpScope => {
                     println!("Current scope: {:?}", self.variables.last());
                 }
@@ -285,6 +323,11 @@ fn parse_program(path: &str) -> Vec<OpCode> {
             "NE" => OpCode::Ne,
             "GE" => OpCode::Ge,
             "LE" => OpCode::Le,
+            "TRUE" => OpCode::True,
+            "FALSE" => OpCode::False,
+            "NOT" => OpCode::Not,
+            "AND" => OpCode::And,
+            "OR" => OpCode::Or,
             "DUMP_SCOPE" => OpCode::DumpScope,
             _ => panic!("Unknown instruction: {line} on line {line_num}"),
         };
