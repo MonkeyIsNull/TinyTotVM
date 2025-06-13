@@ -1,0 +1,18 @@
+PUSH_INT 42
+STORE global
+
+CALL foo
+
+LOAD global
+PRINT     ; should print 42
+
+JMP end
+
+LABEL foo
+PUSH_INT 999
+STORE global    ; stored only in foo's frame
+RET
+
+LABEL end
+HALT
+

@@ -31,6 +31,7 @@ enum OpCode {
     Lt,
     Ge,
     Le,
+    DumpScope,
 }
 
 struct VM {
@@ -38,7 +39,7 @@ struct VM {
     instructions: Vec<OpCode>,
     ip: usize, // instruction pointer
     call_stack: Vec<usize>, // return addresses for CALL/RET
-    variables: HashMap<String, Value>,
+    variables: Vec<HashMap<String, Value>>, // call frame stack
 }
 
 impl VM {
@@ -48,7 +49,7 @@ impl VM {
             instructions,
             ip: 0,
             call_stack: Vec::new(),
-            variables: HashMap::new(),
+            variables: vec![HashMap::new()], // global frame
         }
     }
     
@@ -95,10 +96,12 @@ impl VM {
                 }
                 OpCode::Call(target) => {
                     self.call_stack.push(self.ip + 1);
+                    self.variables.push(HashMap::new()); // push new scope
                     self.ip = *target;
                     continue;
                 }
                 OpCode::Ret => {
+                    self.variables.pop().expect("call frame stack underflow");
                     self.ip = self.call_stack.pop().expect("call stack underflow");
                     continue;
                 }
@@ -116,16 +119,25 @@ impl VM {
                 }      
                 OpCode::Store(name) => {
                     let val = self.stack.pop().expect("stack underflow on STORE");
-                    self.variables.insert(name.clone(), val);
+                    self.variables
+                        .last_mut()
+                        .expect("no variable scope")
+                        .insert(name.clone(), val);
                 }
                 OpCode::Load(name) => {
-                    let val = self.variables.get(name)
+                    let val = self.variables
+                        .last()
+                        .expect("no variable scope")
+                        .get(name)
                         .unwrap_or_else(|| panic!("Undefined variable: {}", name))
                         .clone();
                     self.stack.push(val);
-                }       
+                }
                 OpCode::Delete(name) => {
-                    let removed = self.variables.remove(name);
+                    let removed = self.variables
+                        .last_mut()
+                        .expect("no variable scope")
+                        .remove(name);
                     if removed.is_none() {
                         eprintln!("Warning: tried to DELETE unknown variable '{}'", name);
                     }
@@ -189,7 +201,10 @@ impl VM {
                         }
                         _ => panic!("LE requires two integers"),
                     }
-                }                    
+                }
+                OpCode::DumpScope => {
+                    println!("Current scope: {:?}", self.variables.last());
+                }
                 OpCode::Halt => break,
             }
             self.ip += 1;
@@ -270,6 +285,7 @@ fn parse_program(path: &str) -> Vec<OpCode> {
             "NE" => OpCode::Ne,
             "GE" => OpCode::Ge,
             "LE" => OpCode::Le,
+            "DUMP_SCOPE" => OpCode::DumpScope,
             _ => panic!("Unknown instruction: {line} on line {line_num}"),
         };
         program.push(opcode);
