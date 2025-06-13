@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 mod compiler;
+mod bytecode;
 
 #[derive(Debug, Clone)]
 enum Value {
@@ -399,6 +400,14 @@ fn main() {
         println!("Compiled to {}", output);
         return;
     }
+
+    if args[1].ends_with(".ttb") {
+        let program = bytecode::load_bytecode(&args[1]).expect("Failed to load bytecode");
+        let mut vm = VM::new(program);
+        vm.run();
+        return;
+    }
+
     let program = parse_program(&args[1]);
     let mut vm = VM::new(program);
     vm.run();
