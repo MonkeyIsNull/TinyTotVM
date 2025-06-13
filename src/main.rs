@@ -46,6 +46,8 @@ enum OpCode {
     Len,
     Index,
     DumpScope,
+    ReadFile,
+    WriteFile,
 }
 
 struct VM {
@@ -282,6 +284,29 @@ impl VM {
                         panic!("Index out of bounds");
                     }
                     self.stack.push(list[index].clone());
+                }
+                OpCode::ReadFile => {
+                    let val = self.stack.pop().expect("stack underflow");
+                    if let Value::Str(filename) = val {
+                        match std::fs::read_to_string(&filename) {
+                            Ok(content) => self.stack.push(Value::Str(content)),
+                            Err(e) => panic!("Failed to read file {}: {}", filename, e),
+                        }
+                    } else {
+                        panic!("READ_FILE expects a string filename");
+                    }
+                }
+                OpCode::WriteFile => {
+                    let filename = self.stack.pop().expect("stack underflow");
+                    let content = self.stack.pop().expect("stack underflow");
+                    match (filename, content) {
+                        (Value::Str(fname), Value::Str(body)) => {
+                            if let Err(e) = std::fs::write(&fname, body) {
+                                panic!("Failed to write to file {}: {}", fname, e);
+                            }
+                        }
+                        _ => panic!("WRITE_FILE expects two strings (filename, content)"),
+                    }
                 }
                 OpCode::DumpScope => {
                     println!("Current scope: {:?}", self.variables.last());

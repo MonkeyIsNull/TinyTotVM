@@ -1,0 +1,9 @@
+PUSH_STR "hello from TinyTot!"
+PUSH_STR "example.txt"
+WRITE_FILE
+
+PUSH_STR "example.txt"
+READ_FILE
+PRINT
+HALT
+

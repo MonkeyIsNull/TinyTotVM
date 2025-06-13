@@ -12,47 +12,46 @@ enum Expr {
 }
 
 fn tokenize(input: &str) -> Vec<String> {
-  let mut tokens = Vec::new();
-  for line in input.lines() {
-      let line = line.split(';').next().unwrap_or("").trim();
-      if line.is_empty() {
-          continue;
-      }
+    let mut tokens = Vec::new();
+    for line in input.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
 
-      let mut in_string = false;
-      let mut current = String::new();
+        let mut in_string = false;
+        let mut current = String::new();
 
-      for c in line.chars() {
-          match c {
-              '"' => {
-                  current.push(c);
-                  in_string = !in_string;
-              }
-              '(' | ')' if !in_string => {
-                  if !current.trim().is_empty() {
-                      tokens.push(current.trim().to_string());
-                      current.clear();
-                  }
-                  tokens.push(c.to_string());
-              }
-              ' ' if !in_string => {
-                  if !current.trim().is_empty() {
-                      tokens.push(current.trim().to_string());
-                      current.clear();
-                  }
-              }
-              _ => current.push(c),
-          }
-      }
+        for c in line.chars() {
+            match c {
+                '"' => {
+                    current.push(c);
+                    in_string = !in_string;
+                }
+                '(' | ')' if !in_string => {
+                    if !current.trim().is_empty() {
+                        tokens.push(current.trim().to_string());
+                        current.clear();
+                    }
+                    tokens.push(c.to_string());
+                }
+                ' ' if !in_string => {
+                    if !current.trim().is_empty() {
+                        tokens.push(current.trim().to_string());
+                        current.clear();
+                    }
+                }
+                _ => current.push(c),
+            }
+        }
 
-      if !current.trim().is_empty() {
-          tokens.push(current.trim().to_string());
-      }
-  }
+        if !current.trim().is_empty() {
+            tokens.push(current.trim().to_string());
+        }
+    }
 
-  tokens
+    tokens
 }
-
 
 fn parse(tokens: &mut Vec<String>) -> Expr {
     if tokens.is_empty() {

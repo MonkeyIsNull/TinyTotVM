@@ -45,6 +45,9 @@ enum ByteCode {
     Index = 0x62,
 
     DumpScope = 0x70,
+
+    ReadFile = 0x72,
+    WriteFile = 0x73,
 }
 
 pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result<()> {
@@ -152,6 +155,8 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
             }
             "LEN" => output.write_all(&[ByteCode::Len as u8])?,
             "INDEX" => output.write_all(&[ByteCode::Index as u8])?,
+            "READ_FILE" => output.write_all(&[ByteCode::ReadFile as u8])?,
+            "WRITE_FILE" => output.write_all(&[ByteCode::WriteFile as u8])?,
             "DUMPSCOPE" => output.write_all(&[ByteCode::DumpScope as u8])?,
 
             _ => panic!("Unknown opcode: {}", op),

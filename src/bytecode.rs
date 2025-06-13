@@ -91,6 +91,8 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
             0x61 => OpCode::Len,
             0x62 => OpCode::Index,
             0x70 => OpCode::DumpScope,
+            0x72 => OpCode::ReadFile,
+            0x73 => OpCode::WriteFile,
             0xFF => OpCode::Halt,
             _ => panic!("Unknown bytecode: 0x{:02X}", opcode),
         };
