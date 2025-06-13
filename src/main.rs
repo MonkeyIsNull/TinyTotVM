@@ -25,6 +25,12 @@ enum OpCode {
     Store(String),
     Load(String),
     Delete(String),
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Ge,
+    Le,
 }
 
 struct VM {
@@ -123,7 +129,67 @@ impl VM {
                     if removed.is_none() {
                         eprintln!("Warning: tried to DELETE unknown variable '{}'", name);
                     }
-                }                                   
+                }
+                OpCode::Eq => {
+                    let b = self.stack.pop().expect("stack underflow on EQ");
+                    let a = self.stack.pop().expect("stack underflow on EQ");
+                    let result = match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => x == y,
+                        (Value::Str(x), Value::Str(y)) => x == y,
+                        _ => panic!("EQ requires values of the same type"),
+                    };
+                    self.stack.push(Value::Int(if result { 1 } else { 0 }));
+                } 
+                OpCode::Gt => {
+                    let b = self.stack.pop().expect("stack underflow on GT");
+                    let a = self.stack.pop().expect("stack underflow on GT");
+                    match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => {
+                            self.stack.push(Value::Int(if x > y { 1 } else { 0 }));
+                        }
+                        _ => panic!("GT requires two integers"),
+                    }
+                }
+                OpCode::Lt => {
+                    let b = self.stack.pop().expect("stack underflow on LT");
+                    let a = self.stack.pop().expect("stack underflow on LT");
+                    match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => {
+                            self.stack.push(Value::Int(if x < y { 1 } else { 0 }));
+                        }
+                        _ => panic!("LT requires two integers"),
+                    }
+                }      
+                OpCode::Ne => {
+                    let b = self.stack.pop().expect("stack underflow on NE");
+                    let a = self.stack.pop().expect("stack underflow on NE");
+                    let result = match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => x != y,
+                        (Value::Str(x), Value::Str(y)) => x != y,
+                        _ => panic!("NE requires values of the same type"),
+                    };
+                    self.stack.push(Value::Int(if result { 1 } else { 0 }));
+                }   
+                OpCode::Ge => {
+                    let b = self.stack.pop().expect("stack underflow on GE");
+                    let a = self.stack.pop().expect("stack underflow on GE");
+                    match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => {
+                            self.stack.push(Value::Int(if x >= y { 1 } else { 0 }));
+                        }
+                        _ => panic!("GE requires two integers"),
+                    }
+                }
+                OpCode::Le => {
+                    let b = self.stack.pop().expect("stack underflow on LE");
+                    let a = self.stack.pop().expect("stack underflow on LE");
+                    match (a, b) {
+                        (Value::Int(x), Value::Int(y)) => {
+                            self.stack.push(Value::Int(if x <= y { 1 } else { 0 }));
+                        }
+                        _ => panic!("LE requires two integers"),
+                    }
+                }                    
                 OpCode::Halt => break,
             }
             self.ip += 1;
@@ -198,6 +264,12 @@ fn parse_program(path: &str) -> Vec<OpCode> {
                 let var = parts[1].trim().to_string();
                 OpCode::Load(var)
             }
+            "EQ" => OpCode::Eq,
+            "GT" => OpCode::Gt,
+            "LT" => OpCode::Lt,
+            "NE" => OpCode::Ne,
+            "GE" => OpCode::Ge,
+            "LE" => OpCode::Le,
             _ => panic!("Unknown instruction: {line} on line {line_num}"),
         };
         program.push(opcode);

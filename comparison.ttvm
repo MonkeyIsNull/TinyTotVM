@@ -1,0 +1,15 @@
+PUSH_INT 3
+PUSH_INT 3
+EQ
+JZ not_equal
+PUSH_STR "They're equal!"
+PRINT
+JMP end
+
+LABEL not_equal
+PUSH_STR "Not equal."
+PRINT
+
+LABEL end
+HALT
+

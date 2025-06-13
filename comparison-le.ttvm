@@ -1,0 +1,15 @@
+PUSH_INT 4
+PUSH_INT 4
+LE
+JZ not_less_equal
+PUSH_STR "4 <= 4!"
+PRINT
+JMP end
+
+LABEL not_less_equal
+PUSH_STR "Nope!"
+PRINT
+
+LABEL end
+HALT
+
