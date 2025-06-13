@@ -1,0 +1,10 @@
+PUSH_INT 42
+STORE x
+LOAD x
+PRINT
+
+PUSH_STR "TinyTot"
+STORE name
+LOAD name
+PRINT
+HALT

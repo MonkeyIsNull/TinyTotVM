@@ -1,0 +1,11 @@
+PUSH_INT 5
+LABEL loop
+DUP
+JZ end
+DUP
+PRINT
+PUSH_INT 1
+SUB
+JMP loop
+LABEL end
+HALT
