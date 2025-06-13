@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
-#[repr(u8)]
+#[repr(u16)]
 #[derive(Debug, Clone, Copy)]
 enum ByteCode {
     PushInt = 0x01,
@@ -80,35 +80,35 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
 
         match op {
             "PUSH_INT" => {
-                output.write_all(&[ByteCode::PushInt as u8])?;
+                output.write_all(&(ByteCode::PushInt as u16).to_le_bytes())?;
                 let n: i64 = arg.unwrap().parse().expect("Invalid integer");
                 output.write_all(&n.to_le_bytes())?;
             }
             "PUSH_STR" => {
-                output.write_all(&[ByteCode::PushStr as u8])?;
+                output.write_all(&(ByteCode::PushStr as u16).to_le_bytes())?;
                 let s = arg.unwrap().trim_matches('"');
                 let bytes = s.as_bytes();
-                output.write_all(&[bytes.len() as u8])?;
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
                 output.write_all(bytes)?;
             }
-            "TRUE" => output.write_all(&[ByteCode::True as u8])?,
-            "FALSE" => output.write_all(&[ByteCode::False as u8])?,
-            "NULL" => output.write_all(&[ByteCode::Null as u8])?,
-            "ADD" => output.write_all(&[ByteCode::Add as u8])?,
-            "SUB" => output.write_all(&[ByteCode::Sub as u8])?,
-            "CONCAT" => output.write_all(&[ByteCode::Concat as u8])?,
-            "EQ" => output.write_all(&[ByteCode::Eq as u8])?,
-            "NE" => output.write_all(&[ByteCode::Ne as u8])?,
-            "GT" => output.write_all(&[ByteCode::Gt as u8])?,
-            "LT" => output.write_all(&[ByteCode::Lt as u8])?,
-            "GE" => output.write_all(&[ByteCode::Ge as u8])?,
-            "LE" => output.write_all(&[ByteCode::Le as u8])?,
-            "NOT" => output.write_all(&[ByteCode::Not as u8])?,
-            "AND" => output.write_all(&[ByteCode::And as u8])?,
-            "OR" => output.write_all(&[ByteCode::Or as u8])?,
-            "DUP" => output.write_all(&[ByteCode::Dup as u8])?,
-            "PRINT" => output.write_all(&[ByteCode::Print as u8])?,
-            "HALT" => output.write_all(&[ByteCode::Halt as u8])?,
+            "TRUE" => output.write_all(&(ByteCode::True as u16).to_le_bytes())?,
+            "FALSE" => output.write_all(&(ByteCode::False as u16).to_le_bytes())?,
+            "NULL" => output.write_all(&(ByteCode::Null as u16).to_le_bytes())?,
+            "ADD" => output.write_all(&(ByteCode::Add as u16).to_le_bytes())?,
+            "SUB" => output.write_all(&(ByteCode::Sub as u16).to_le_bytes())?,
+            "CONCAT" => output.write_all(&(ByteCode::Concat as u16).to_le_bytes())?,
+            "EQ" => output.write_all(&(ByteCode::Eq as u16).to_le_bytes())?,
+            "NE" => output.write_all(&(ByteCode::Ne as u16).to_le_bytes())?,
+            "GT" => output.write_all(&(ByteCode::Gt as u16).to_le_bytes())?,
+            "LT" => output.write_all(&(ByteCode::Lt as u16).to_le_bytes())?,
+            "GE" => output.write_all(&(ByteCode::Ge as u16).to_le_bytes())?,
+            "LE" => output.write_all(&(ByteCode::Le as u16).to_le_bytes())?,
+            "NOT" => output.write_all(&(ByteCode::Not as u16).to_le_bytes())?,
+            "AND" => output.write_all(&(ByteCode::And as u16).to_le_bytes())?,
+            "OR" => output.write_all(&(ByteCode::Or as u16).to_le_bytes())?,
+            "DUP" => output.write_all(&(ByteCode::Dup as u16).to_le_bytes())?,
+            "PRINT" => output.write_all(&(ByteCode::Print as u16).to_le_bytes())?,
+            "HALT" => output.write_all(&(ByteCode::Halt as u16).to_le_bytes())?,
 
             "JMP" | "JZ" | "CALL" => {
                 let addr = arg
@@ -120,48 +120,48 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
                     "JZ" => ByteCode::Jz,
                     "CALL" => ByteCode::Call,
                     _ => unreachable!(),
-                } as u8;
-                output.write_all(&[code])?;
+                };
+                output.write_all(&(code as u16).to_le_bytes())?;
                 output.write_all(&(addr as u16).to_le_bytes())?;
             }
 
-            "RET" => output.write_all(&[ByteCode::Ret as u8])?,
+            "RET" => output.write_all(&(ByteCode::Ret as u16).to_le_bytes())?,
 
             "STORE" => {
-                output.write_all(&[ByteCode::Store as u8])?;
+                output.write_all(&(ByteCode::Store as u16).to_le_bytes())?;
                 let name = arg.unwrap().trim_matches('"');
                 let bytes = name.as_bytes();
-                output.write_all(&[bytes.len() as u8])?;
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
                 output.write_all(bytes)?;
             }
             "LOAD" => {
-                output.write_all(&[ByteCode::Load as u8])?;
+                output.write_all(&(ByteCode::Load as u16).to_le_bytes())?;
                 let name = arg.unwrap().trim_matches('"');
                 let bytes = name.as_bytes();
-                output.write_all(&[bytes.len() as u8])?;
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
                 output.write_all(bytes)?;
             }
             "DELETE" => {
-                output.write_all(&[ByteCode::Delete as u8])?;
+                output.write_all(&(ByteCode::Delete as u16).to_le_bytes())?;
                 let name = arg.unwrap().trim_matches('"');
                 let bytes = name.as_bytes();
-                output.write_all(&[bytes.len() as u8])?;
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
                 output.write_all(bytes)?;
             }
+
             "MAKELIST" => {
-                output.write_all(&[ByteCode::MakeList as u8])?;
+                output.write_all(&(ByteCode::MakeList as u16).to_le_bytes())?;
                 let n: u8 = arg.unwrap().parse().expect("Invalid list size");
                 output.write_all(&[n])?;
             }
-            "LEN" => output.write_all(&[ByteCode::Len as u8])?,
-            "INDEX" => output.write_all(&[ByteCode::Index as u8])?,
-            "READ_FILE" => output.write_all(&[ByteCode::ReadFile as u8])?,
-            "WRITE_FILE" => output.write_all(&[ByteCode::WriteFile as u8])?,
-            "DUMPSCOPE" => output.write_all(&[ByteCode::DumpScope as u8])?,
+            "LEN" => output.write_all(&(ByteCode::Len as u16).to_le_bytes())?,
+            "INDEX" => output.write_all(&(ByteCode::Index as u16).to_le_bytes())?,
+            "READ_FILE" => output.write_all(&(ByteCode::ReadFile as u16).to_le_bytes())?,
+            "WRITE_FILE" => output.write_all(&(ByteCode::WriteFile as u16).to_le_bytes())?,
+            "DUMPSCOPE" => output.write_all(&(ByteCode::DumpScope as u16).to_le_bytes())?,
 
             _ => panic!("Unknown opcode: {}", op),
         }
     }
-
     Ok(())
 }

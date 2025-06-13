@@ -13,88 +13,97 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
     let mut ip = 0;
 
     while ip < buffer.len() {
-        let opcode = buffer[ip];
-        ip += 1;
+        let opcode = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap());
+        ip += 2;
 
         let op = match opcode {
-            0x01 => {
+            0x0001 => {
                 let val = i64::from_le_bytes(buffer[ip..ip + 8].try_into().unwrap());
                 ip += 8;
                 OpCode::PushInt(val)
             }
-            0x02 => {
-                let len = buffer[ip] as usize;
-                ip += 1;
+            0x0002 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
                 let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::PushStr(s)
             }
-            0x03 => OpCode::True,
-            0x04 => OpCode::False,
-            0x05 => OpCode::Null,
-            0x06 => OpCode::Not,
-            0x07 => OpCode::And,
-            0x08 => OpCode::Or,
-            0x09 => OpCode::Dup,
-            0x10 => OpCode::Add,
-            0x11 => OpCode::Sub,
-            0x12 => OpCode::Concat,
-            0x20 => OpCode::Eq,
-            0x21 => OpCode::Gt,
-            0x22 => OpCode::Lt,
-            0x23 => OpCode::Ne,
-            0x24 => OpCode::Ge,
-            0x25 => OpCode::Le,
-            0x30 => {
+            0x0003 => OpCode::True,
+            0x0004 => OpCode::False,
+            0x0005 => OpCode::Null,
+            0x0006 => OpCode::Not,
+            0x0007 => OpCode::And,
+            0x0008 => OpCode::Or,
+            0x0009 => OpCode::Dup,
+
+            0x0010 => OpCode::Add,
+            0x0011 => OpCode::Sub,
+            0x0012 => OpCode::Concat,
+
+            0x0020 => OpCode::Eq,
+            0x0021 => OpCode::Gt,
+            0x0022 => OpCode::Lt,
+            0x0023 => OpCode::Ne,
+            0x0024 => OpCode::Ge,
+            0x0025 => OpCode::Le,
+
+            0x0030 => {
                 let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
                 ip += 2;
                 OpCode::Jmp(addr)
             }
-            0x31 => {
+            0x0031 => {
                 let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
                 ip += 2;
                 OpCode::Jz(addr)
             }
-            0x32 => {
+            0x0032 => {
                 let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
                 ip += 2;
                 OpCode::Call(addr)
             }
-            0x33 => OpCode::Ret,
-            0x40 => OpCode::Print,
-            0x50 => {
-                let len = buffer[ip] as usize;
-                ip += 1;
+            0x0033 => OpCode::Ret,
+
+            0x0040 => OpCode::Print,
+
+            0x0050 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
                 let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::Store(s)
             }
-            0x51 => {
-                let len = buffer[ip] as usize;
-                ip += 1;
+            0x0051 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
                 let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::Load(s)
             }
-            0x52 => {
-                let len = buffer[ip] as usize;
-                ip += 1;
+            0x0052 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
                 let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::Delete(s)
             }
-            0x60 => {
+
+            0x0060 => {
                 let n = buffer[ip] as usize;
                 ip += 1;
                 OpCode::MakeList(n)
             }
-            0x61 => OpCode::Len,
-            0x62 => OpCode::Index,
-            0x70 => OpCode::DumpScope,
-            0x72 => OpCode::ReadFile,
-            0x73 => OpCode::WriteFile,
-            0xFF => OpCode::Halt,
-            _ => panic!("Unknown bytecode: 0x{:02X}", opcode),
+            0x0061 => OpCode::Len,
+            0x0062 => OpCode::Index,
+
+            0x0070 => OpCode::DumpScope,
+            0x0072 => OpCode::ReadFile,
+            0x0073 => OpCode::WriteFile,
+
+            0x00FF => OpCode::Halt,
+
+            _ => panic!("Unknown bytecode: 0x{:04X}", opcode),
         };
 
         instructions.push(op);
