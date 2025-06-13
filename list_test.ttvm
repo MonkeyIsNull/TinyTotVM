@@ -1,0 +1,13 @@
+PUSH_INT 10
+PUSH_INT 20
+PUSH_INT 30
+MAKE_LIST 3
+DUP            ; <-- duplicate the list
+PRINT          ; print the list
+DUP            ; <-- duplicate again for LEN
+LEN
+PRINT
+PUSH_INT 1
+INDEX
+PRINT
+HALT

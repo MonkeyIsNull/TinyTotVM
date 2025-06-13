@@ -1,0 +1,10 @@
+NULL
+DUP
+PRINT
+JZ skip
+PUSH_STR "This will never print"
+PRINT
+
+LABEL skip
+HALT
+
