@@ -1,0 +1,12 @@
+PUSH_INT 123
+STORE secret
+
+LOAD secret
+PRINT
+
+DELETE secret
+
+LOAD secret     ; should panic or error here
+PRINT
+
+HALT

@@ -24,6 +24,7 @@ enum OpCode {
     Dup,
     Store(String),
     Load(String),
+    Delete(String),
 }
 
 struct VM {
@@ -116,7 +117,13 @@ impl VM {
                         .unwrap_or_else(|| panic!("Undefined variable: {}", name))
                         .clone();
                     self.stack.push(val);
-                }                          
+                }       
+                OpCode::Delete(name) => {
+                    let removed = self.variables.remove(name);
+                    if removed.is_none() {
+                        eprintln!("Warning: tried to DELETE unknown variable '{}'", name);
+                    }
+                }                                   
                 OpCode::Halt => break,
             }
             self.ip += 1;
@@ -182,6 +189,10 @@ fn parse_program(path: &str) -> Vec<OpCode> {
             "STORE" => {
                 let var = parts[1].trim().to_string();
                 OpCode::Store(var)
+            }
+            "DELETE" => {
+                let var = parts[1].trim().to_string();
+                OpCode::Delete(var)
             }
             "LOAD" => {
                 let var = parts[1].trim().to_string();
