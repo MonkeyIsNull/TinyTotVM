@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::env;
 use std::fs;
+mod compiler;
 
 #[derive(Debug, Clone)]
 enum Value {
@@ -386,12 +386,19 @@ fn parse_program(path: &str) -> Vec<OpCode> {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: tinytotvm <file.ttvm>");
-        std::process::exit(1);
-    }
+    let args: Vec<String> = std::env::args().collect();
 
+    if args.len() >= 2 && args[1] == "compile" {
+        if args.len() != 4 {
+            eprintln!("Usage: tinytotvm compile <input.ttvm> <output.ttb>");
+            std::process::exit(1);
+        }
+        let input = &args[2];
+        let output = &args[3];
+        compiler::compile(input, output).expect("Compilation failed");
+        println!("Compiled to {}", output);
+        return;
+    }
     let program = parse_program(&args[1]);
     let mut vm = VM::new(program);
     vm.run();
