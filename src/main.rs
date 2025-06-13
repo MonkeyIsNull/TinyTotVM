@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
-mod compiler;
 mod bytecode;
+mod compiler;
+mod lisp_compiler;
 
 #[derive(Debug, Clone)]
 enum Value {
@@ -405,6 +406,18 @@ fn main() {
         let program = bytecode::load_bytecode(&args[1]).expect("Failed to load bytecode");
         let mut vm = VM::new(program);
         vm.run();
+        return;
+    }
+
+    if args[1] == "compile-lisp" {
+        if args.len() != 4 {
+            eprintln!("Usage: tinytotvm compile-lisp <input.lisp> <output.ttvm>");
+            std::process::exit(1);
+        }
+        let input = &args[2];
+        let output = &args[3];
+        lisp_compiler::compile_lisp(input, output);
+        println!("Compiled Lisp to {}", output);
         return;
     }
 

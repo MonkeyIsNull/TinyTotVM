@@ -1,7 +1,7 @@
 // bytecode.rs
-use std::fs::File;
-use std::io::{Read, BufReader};
 use crate::OpCode;
+use std::fs::File;
+use std::io::{BufReader, Read};
 
 pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
     let file = File::open(path)?;
@@ -18,14 +18,14 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
 
         let op = match opcode {
             0x01 => {
-                let val = i64::from_le_bytes(buffer[ip..ip+8].try_into().unwrap());
+                let val = i64::from_le_bytes(buffer[ip..ip + 8].try_into().unwrap());
                 ip += 8;
                 OpCode::PushInt(val)
             }
             0x02 => {
                 let len = buffer[ip] as usize;
                 ip += 1;
-                let s = String::from_utf8(buffer[ip..ip+len].to_vec()).unwrap();
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::PushStr(s)
             }
@@ -46,17 +46,17 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
             0x24 => OpCode::Ge,
             0x25 => OpCode::Le,
             0x30 => {
-                let addr = u16::from_le_bytes(buffer[ip..ip+2].try_into().unwrap()) as usize;
+                let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
                 ip += 2;
                 OpCode::Jmp(addr)
             }
             0x31 => {
-                let addr = u16::from_le_bytes(buffer[ip..ip+2].try_into().unwrap()) as usize;
+                let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
                 ip += 2;
                 OpCode::Jz(addr)
             }
             0x32 => {
-                let addr = u16::from_le_bytes(buffer[ip..ip+2].try_into().unwrap()) as usize;
+                let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
                 ip += 2;
                 OpCode::Call(addr)
             }
@@ -65,21 +65,21 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
             0x50 => {
                 let len = buffer[ip] as usize;
                 ip += 1;
-                let s = String::from_utf8(buffer[ip..ip+len].to_vec()).unwrap();
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::Store(s)
             }
             0x51 => {
                 let len = buffer[ip] as usize;
                 ip += 1;
-                let s = String::from_utf8(buffer[ip..ip+len].to_vec()).unwrap();
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::Load(s)
             }
             0x52 => {
                 let len = buffer[ip] as usize;
                 ip += 1;
-                let s = String::from_utf8(buffer[ip..ip+len].to_vec()).unwrap();
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
                 ip += len;
                 OpCode::Delete(s)
             }

@@ -7,42 +7,42 @@ use std::path::Path;
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 enum ByteCode {
-    PushInt   = 0x01,
-    PushStr   = 0x02,
-    True      = 0x03,
-    False     = 0x04,
-    Null      = 0x05,
-    Not       = 0x06,
-    And       = 0x07,
-    Or        = 0x08,
-    Dup       = 0x09,
+    PushInt = 0x01,
+    PushStr = 0x02,
+    True = 0x03,
+    False = 0x04,
+    Null = 0x05,
+    Not = 0x06,
+    And = 0x07,
+    Or = 0x08,
+    Dup = 0x09,
 
-    Add       = 0x10,
-    Sub       = 0x11,
-    Concat    = 0x12,
+    Add = 0x10,
+    Sub = 0x11,
+    Concat = 0x12,
 
-    Eq        = 0x20,
-    Ne        = 0x23,
-    Gt        = 0x21,
-    Lt        = 0x22,
-    Ge        = 0x24,
-    Le        = 0x25,
+    Eq = 0x20,
+    Ne = 0x23,
+    Gt = 0x21,
+    Lt = 0x22,
+    Ge = 0x24,
+    Le = 0x25,
 
-    Jmp       = 0x30,
-    Jz        = 0x31,
-    Call      = 0x32,
-    Ret       = 0x33,
+    Jmp = 0x30,
+    Jz = 0x31,
+    Call = 0x32,
+    Ret = 0x33,
 
-    Print     = 0x40,
-    Halt      = 0xFF,
+    Print = 0x40,
+    Halt = 0xFF,
 
-    Store     = 0x50,
-    Load      = 0x51,
-    Delete    = 0x52,
+    Store = 0x50,
+    Load = 0x51,
+    Delete = 0x52,
 
-    MakeList  = 0x60,
-    Len       = 0x61,
-    Index     = 0x62,
+    MakeList = 0x60,
+    Len = 0x61,
+    Index = 0x62,
 
     DumpScope = 0x70,
 }
@@ -58,7 +58,9 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
     // First pass: collect lines and label addresses
     for line in reader.lines() {
         let line = line?.trim().to_string();
-        if line.is_empty() || line.starts_with(';') { continue; }
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
 
         if let Some(label) = line.strip_prefix("LABEL ") {
             labels.insert(label.trim().to_string(), lines.len());
