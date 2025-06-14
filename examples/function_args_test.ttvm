@@ -1,0 +1,11 @@
+PUSH_INT 42
+PUSH_STR "Hello from caller"
+CALL myfunc x msg
+HALT
+
+LABEL myfunc
+LOAD x
+PRINT
+LOAD msg
+PRINT
+RET

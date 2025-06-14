@@ -59,9 +59,23 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
                 OpCode::Jz(addr)
             }
             0x0032 => {
-                let addr = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                // Read target address (2 bytes)
+                let addr = u16::from_le_bytes(buffer[ip..ip+2].try_into().unwrap()) as usize;
                 ip += 2;
-                OpCode::Call(addr)
+                // Read parameter count (2 bytes)
+                let count = u16::from_le_bytes(buffer[ip..ip+2].try_into().unwrap()) as usize;
+                ip += 2;
+                // Read each parameter name
+                let mut params = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let len = u16::from_le_bytes(buffer[ip..ip+2].try_into().unwrap()) as usize;
+                    ip += 2;
+                    let name_bytes = &buffer[ip..ip+len];
+                    let name = String::from_utf8(name_bytes.to_vec()).unwrap();
+                    ip += len;
+                    params.push(name);
+                }
+                OpCode::Call{addr, params}
             }
             0x0033 => OpCode::Ret,
 

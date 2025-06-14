@@ -110,7 +110,7 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
             "PRINT" => output.write_all(&(ByteCode::Print as u16).to_le_bytes())?,
             "HALT" => output.write_all(&(ByteCode::Halt as u16).to_le_bytes())?,
 
-            "JMP" | "JZ" | "CALL" => {
+            "JMP" | "JZ" => {
                 let addr = arg
                     .and_then(|label| labels.get(label))
                     .copied()
@@ -118,13 +118,30 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
                 let code = match op {
                     "JMP" => ByteCode::Jmp,
                     "JZ" => ByteCode::Jz,
-                    "CALL" => ByteCode::Call,
                     _ => unreachable!(),
                 };
                 output.write_all(&(code as u16).to_le_bytes())?;
                 output.write_all(&(addr as u16).to_le_bytes())?;
             }
-
+            "CALL" => {
+                    output.write_all(&(ByteCode::Call as u16).to_le_bytes())?;
+                    let tokens: Vec<&str> = arg.unwrap().split_whitespace().collect();
+                    let label_name = tokens[0];
+                    let addr = labels.get(label_name)
+                            .copied()
+                            .expect("Unknown call label");
+                    // Write the function address (2 bytes)
+                    output.write_all(&(addr as u16).to_le_bytes())?;
+                    // Write parameter count (2 bytes)
+                    let param_count = (tokens.len() - 1) as u16;
+                    output.write_all(&param_count.to_le_bytes())?;
+                    // Write each parameter name (length + bytes)
+                    for param in &tokens[1..] {
+                        let name_bytes = param.as_bytes();
+                        output.write_all(&(name_bytes.len() as u16).to_le_bytes())?;
+                        output.write_all(name_bytes)?;
+                    }
+                }
             "RET" => output.write_all(&(ByteCode::Ret as u16).to_le_bytes())?,
 
             "STORE" => {
