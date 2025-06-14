@@ -23,7 +23,7 @@ enum OpCode {
     Halt,
     Jmp(usize),
     Jz(usize),
-    Call(usize),
+    Call { addr: usize, params: Vec<String> },
     Ret,
     Sub,
     Dup,
@@ -111,11 +111,18 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::Call(target) => {
-                    self.call_stack.push(self.ip + 1);
-                    self.variables.push(HashMap::new()); // push new scope
-                    self.ip = *target;
-                    continue;
+                OpCode::Call{ addr, params } => {
+                    // Save return address
+                        self.call_stack.push(self.ip + 1);
+                        let mut frame = HashMap::new();
+                        // If params is empty, just push an empty frame
+                        for name in params.iter().rev() {
+                            let value = self.stack.pop().expect("stack underflow on CALL");
+                            frame.insert(name.clone(), value);
+                        }
+                        self.variables.push(frame);
+                        self.ip = *addr;
+                        continue;
                 }
                 OpCode::Ret => {
                     self.variables.pop().expect("call frame stack underflow");
@@ -360,7 +367,7 @@ fn parse_program(path: &str) -> Vec<OpCode> {
             "CALL" => {
                 let label = parts[1].trim();
                 let target = label_map.get(label).expect("Unknown label in CALL");
-                OpCode::Call(*target)
+                OpCode::Call { addr: *target, params: vec![] }
             }
             "JMP" => {
                 let label = parts[1].trim();

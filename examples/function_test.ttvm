@@ -1,0 +1,10 @@
+PUSH_INT 42
+CALL myfunc
+PRINT
+HALT
+
+LABEL myfunc
+PUSH_STR "Inside function"
+PRINT
+RET
+
