@@ -54,6 +54,7 @@ enum Value {
     Null,
     List(Vec<Value>),
     Object(HashMap<String, Value>),
+    Function { addr: usize, params: Vec<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,9 @@ enum OpCode {
     HasField(String),   // field name
     DeleteField(String), // field name
     Keys,              // get all keys as a list
+    // Function operations
+    MakeFunction { addr: usize, params: Vec<String> }, // create function pointer
+    CallFunction,      // call function from stack
 }
 
 struct VM {
@@ -411,6 +415,9 @@ impl VM {
                         (Value::Str(x), Value::Str(y)) => x == y,
                         (Value::Bool(x), Value::Bool(y)) => x == y,
                         (Value::Null, Value::Null) => true,
+                        (Value::Function { addr: addr1, params: params1 }, Value::Function { addr: addr2, params: params2 }) => {
+                            addr1 == addr2 && params1 == params2
+                        },
                         _ => return Err(VMError::TypeMismatch { 
                             expected: "values of the same type".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
@@ -456,6 +463,9 @@ impl VM {
                         (Value::Str(x), Value::Str(y)) => x != y,
                         (Value::Bool(x), Value::Bool(y)) => x != y,
                         (Value::Null, Value::Null) => false,
+                        (Value::Function { addr: addr1, params: params1 }, Value::Function { addr: addr2, params: params2 }) => {
+                            addr1 != addr2 || params1 != params2
+                        },
                         _ => return Err(VMError::TypeMismatch { 
                             expected: "values of the same type".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
@@ -738,6 +748,39 @@ impl VM {
                         }),
                     }
                 }
+                OpCode::MakeFunction { addr, params } => {
+                    let function = Value::Function { addr: *addr, params: params.clone() };
+                    self.stack.push(function);
+                }
+                OpCode::CallFunction => {
+                    let function = self.pop_stack("CALL_FUNCTION")?;
+                    match function {
+                        Value::Function { addr, params } => {
+                            // Check if we have enough arguments on the stack
+                            self.check_stack_size(params.len(), "CALL_FUNCTION")?;
+                            
+                            // Save return address
+                            self.call_stack.push(self.ip + 1);
+                            
+                            // Create new variable frame for function parameters
+                            let mut frame = HashMap::new();
+                            for name in params.iter().rev() {
+                                let value = self.pop_stack("CALL_FUNCTION")?;
+                                frame.insert(name.clone(), value);
+                            }
+                            self.variables.push(frame);
+                            
+                            // Jump to function
+                            self.ip = addr;
+                            continue;
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "a function".to_string(), 
+                            got: format!("{:?}", function), 
+                            operation: "CALL_FUNCTION".to_string() 
+                        }),
+                    }
+                }
                 OpCode::ReadFile => {
                     let val = self.pop_stack("READ_file")?;
                     match val {
@@ -936,6 +979,23 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 OpCode::DeleteField(field)
             }
             "KEYS" => OpCode::Keys,
+            "MAKE_FUNCTION" => {
+                if parts.len() < 2 {
+                    return Err(VMError::ParseError { line: line_num, instruction: "MAKE_FUNCTION requires at least a target".to_string() });
+                }
+                let func_parts: Vec<&str> = parts[1].split_whitespace().collect();
+                let label = func_parts[0];
+                let params: Vec<String> = func_parts[1..].iter().map(|s| s.to_string()).collect();
+                
+                // Try parsing as number first, then as label
+                let addr = if let Ok(address) = label.parse::<usize>() {
+                    address
+                } else {
+                    *label_map.get(label).ok_or_else(|| VMError::UnknownLabel(label.to_string()))?
+                };
+                OpCode::MakeFunction { addr, params }
+            }
+            "CALL_FUNCTION" => OpCode::CallFunction,
             "READ_FILE" => OpCode::ReadFile,
             "WRITE_FILE" => OpCode::WriteFile,
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),

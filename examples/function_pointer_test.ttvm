@@ -1,0 +1,55 @@
+; Test function pointers
+JMP main
+
+LABEL double
+LOAD x
+PUSH_FLOAT 2.0
+MUL_F
+PRINT
+RET
+
+LABEL square
+LOAD x  
+DUP
+MUL_F
+PRINT
+RET
+
+LABEL main
+; Create function pointer to 'double' function
+MAKE_FUNCTION double x
+STORE doubleFunc
+
+; Create function pointer to 'square' function  
+MAKE_FUNCTION square x
+STORE squareFunc
+
+; Test calling function through pointer
+PUSH_FLOAT 5.0
+LOAD doubleFunc
+CALL_FUNCTION
+
+; Test calling another function through pointer
+PUSH_FLOAT 3.0
+LOAD squareFunc
+CALL_FUNCTION
+
+; Test storing function in object
+MAKE_OBJECT
+LOAD doubleFunc
+SET_FIELD func
+STORE mathObj
+
+; Call function from object
+PUSH_FLOAT 7.0
+LOAD mathObj
+GET_FIELD func
+CALL_FUNCTION
+
+; Test function equality
+LOAD doubleFunc
+LOAD doubleFunc
+EQ
+PRINT
+
+HALT

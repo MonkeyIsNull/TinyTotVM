@@ -1,0 +1,62 @@
+; Test higher-order functions (functions that take other functions)
+JMP main
+
+LABEL add_one
+LOAD x
+PUSH_FLOAT 1.0
+ADD_F
+PRINT
+RET
+
+LABEL multiply_by_two
+LOAD x
+PUSH_FLOAT 2.0
+MUL_F
+PRINT
+RET
+
+LABEL apply_function
+; This function takes a value and a function, then applies the function
+LOAD value
+LOAD func
+CALL_FUNCTION
+RET
+
+LABEL main
+; Create function pointers
+MAKE_FUNCTION add_one x
+STORE add_one_func
+
+MAKE_FUNCTION multiply_by_two x
+STORE mult_func
+
+; Create higher-order function pointer
+MAKE_FUNCTION apply_function value func
+STORE apply_func
+
+; Test: apply add_one to 5.0
+PUSH_FLOAT 5.0
+LOAD add_one_func
+LOAD apply_func
+CALL_FUNCTION
+
+; Test: apply multiply_by_two to 3.0
+PUSH_FLOAT 3.0
+LOAD mult_func
+LOAD apply_func
+CALL_FUNCTION
+
+; Store functions in a list
+LOAD add_one_func
+LOAD mult_func
+MAKE_LIST 2
+STORE function_list
+
+; Apply first function in list to 10.0
+PUSH_FLOAT 10.0
+LOAD function_list
+PUSH_INT 0
+INDEX
+CALL_FUNCTION
+
+HALT
