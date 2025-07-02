@@ -1,0 +1,49 @@
+; Test nested objects
+MAKE_OBJECT
+PUSH_STR "John Doe"
+SET_FIELD name
+
+; Create address object
+MAKE_OBJECT
+PUSH_STR "123 Main St"
+SET_FIELD street
+PUSH_STR "New York"
+SET_FIELD city
+PUSH_INT 10001
+SET_FIELD zipcode
+
+; Set address as field in person
+SET_FIELD address
+
+; Create hobbies list
+PUSH_STR "programming"
+PUSH_STR "reading"
+PUSH_STR "gaming"
+MAKE_LIST 3
+SET_FIELD hobbies
+
+; Test accessing nested data
+DUP
+GET_FIELD name
+PRINT
+
+DUP
+GET_FIELD address
+GET_FIELD street
+PRINT
+
+DUP
+GET_FIELD address
+GET_FIELD city
+PRINT
+
+DUP
+GET_FIELD hobbies
+PUSH_INT 0
+INDEX
+PRINT
+
+; Print whole object
+PRINT
+
+HALT

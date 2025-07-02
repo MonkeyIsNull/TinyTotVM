@@ -1,0 +1,47 @@
+; Test object operations
+MAKE_OBJECT
+PUSH_STR "John"
+SET_FIELD name
+PUSH_INT 25
+SET_FIELD age
+PUSH_FLOAT 75.5
+SET_FIELD weight
+
+; Test getting fields
+DUP
+GET_FIELD name
+PRINT
+
+DUP
+GET_FIELD age
+PRINT
+
+DUP
+GET_FIELD weight
+PRINT
+
+; Test has field
+DUP
+HAS_FIELD name
+PRINT
+
+DUP
+HAS_FIELD height
+PRINT
+
+; Test object length
+DUP
+LEN
+PRINT
+
+; Test getting keys
+DUP
+KEYS
+PRINT
+
+; Test deleting field
+DELETE_FIELD weight
+LEN
+PRINT
+
+HALT

@@ -53,6 +53,7 @@ enum Value {
     Bool(bool),
     Null,
     List(Vec<Value>),
+    Object(HashMap<String, Value>),
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +102,13 @@ enum OpCode {
     DumpScope,
     ReadFile,
     WriteFile,
+    // Object operations
+    MakeObject,
+    SetField(String),   // field name
+    GetField(String),   // field name
+    HasField(String),   // field name
+    DeleteField(String), // field name
+    Keys,              // get all keys as a list
 }
 
 struct VM {
@@ -625,8 +633,9 @@ impl VM {
                     let val = self.pop_stack("LEN")?;
                     match val {
                         Value::List(l) => self.stack.push(Value::Int(l.len() as i64)),
+                        Value::Object(o) => self.stack.push(Value::Int(o.len() as i64)),
                         _ => return Err(VMError::TypeMismatch { 
-                            expected: "a list".to_string(), 
+                            expected: "a list or object".to_string(), 
                             got: format!("{:?}", val), 
                             operation: "LEN".to_string() 
                         }),
@@ -653,6 +662,81 @@ impl VM {
                         return Err(VMError::IndexOutOfBounds { index, length: list.len() });
                     }
                     self.stack.push(list[index].clone());
+                }
+                OpCode::MakeObject => {
+                    let obj = HashMap::new();
+                    self.stack.push(Value::Object(obj));
+                }
+                OpCode::SetField(field_name) => {
+                    let value = self.pop_stack("SET_FIELD")?;
+                    let obj = self.pop_stack("SET_FIELD")?;
+                    match obj {
+                        Value::Object(mut map) => {
+                            map.insert(field_name.clone(), value);
+                            self.stack.push(Value::Object(map));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "an object".to_string(), 
+                            got: format!("{:?}", obj), 
+                            operation: "SET_FIELD".to_string() 
+                        }),
+                    }
+                }
+                OpCode::GetField(field_name) => {
+                    let obj = self.pop_stack("GET_FIELD")?;
+                    match obj {
+                        Value::Object(map) => {
+                            let value = map.get(field_name).cloned().unwrap_or(Value::Null);
+                            self.stack.push(value);
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "an object".to_string(), 
+                            got: format!("{:?}", obj), 
+                            operation: "GET_FIELD".to_string() 
+                        }),
+                    }
+                }
+                OpCode::HasField(field_name) => {
+                    let obj = self.pop_stack("HAS_FIELD")?;
+                    match obj {
+                        Value::Object(map) => {
+                            let has_field = map.contains_key(field_name);
+                            self.stack.push(Value::Int(if has_field { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "an object".to_string(), 
+                            got: format!("{:?}", obj), 
+                            operation: "HAS_FIELD".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DeleteField(field_name) => {
+                    let obj = self.pop_stack("DELETE_FIELD")?;
+                    match obj {
+                        Value::Object(mut map) => {
+                            map.remove(field_name);
+                            self.stack.push(Value::Object(map));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "an object".to_string(), 
+                            got: format!("{:?}", obj), 
+                            operation: "DELETE_FIELD".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Keys => {
+                    let obj = self.pop_stack("KEYS")?;
+                    match obj {
+                        Value::Object(map) => {
+                            let keys: Vec<Value> = map.keys().map(|k| Value::Str(k.clone())).collect();
+                            self.stack.push(Value::List(keys));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "an object".to_string(), 
+                            got: format!("{:?}", obj), 
+                            operation: "KEYS".to_string() 
+                        }),
+                    }
                 }
                 OpCode::ReadFile => {
                     let val = self.pop_stack("READ_file")?;
@@ -834,6 +918,24 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "LEN" => OpCode::Len,
             "INDEX" => OpCode::Index,
             "DUMP_SCOPE" => OpCode::DumpScope,
+            "MAKE_OBJECT" => OpCode::MakeObject,
+            "SET_FIELD" => {
+                let field = parts[1].trim().to_string();
+                OpCode::SetField(field)
+            }
+            "GET_FIELD" => {
+                let field = parts[1].trim().to_string();
+                OpCode::GetField(field)
+            }
+            "HAS_FIELD" => {
+                let field = parts[1].trim().to_string();
+                OpCode::HasField(field)
+            }
+            "DELETE_FIELD" => {
+                let field = parts[1].trim().to_string();
+                OpCode::DeleteField(field)
+            }
+            "KEYS" => OpCode::Keys,
             "READ_FILE" => OpCode::ReadFile,
             "WRITE_FILE" => OpCode::WriteFile,
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
