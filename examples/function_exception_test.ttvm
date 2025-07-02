@@ -1,0 +1,45 @@
+; Test exception handling with function calls
+JMP main
+
+LABEL throwing_function
+LOAD msg
+THROW
+
+LABEL safe_function
+PUSH_STR "Safe function executed"
+PRINT
+RET
+
+LABEL main
+; Test exception thrown from function call
+TRY catch_from_function
+PUSH_STR "Exception from function"
+MAKE_FUNCTION throwing_function msg
+CALL_FUNCTION
+
+LABEL catch_from_function
+CATCH
+PUSH_STR "Caught exception from function: "
+PRINT
+PRINT
+END_TRY
+
+; Test normal function call in try block
+TRY catch_safe_function
+MAKE_FUNCTION safe_function
+CALL_FUNCTION
+PUSH_STR "After safe function call"
+PRINT
+END_TRY
+JMP end_program
+
+LABEL catch_safe_function
+CATCH
+PUSH_STR "This should not execute"
+PRINT
+END_TRY
+
+LABEL end_program
+PUSH_STR "Program completed"
+PRINT
+HALT

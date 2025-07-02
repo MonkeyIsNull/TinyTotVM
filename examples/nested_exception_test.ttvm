@@ -1,0 +1,42 @@
+; Test nested exception handling
+JMP main
+
+LABEL main
+; Outer try block
+TRY outer_catch
+PUSH_STR "In outer try block"
+PRINT
+
+; Inner try block
+TRY inner_catch
+PUSH_STR "In inner try block"
+PRINT
+PUSH_STR "Inner exception"
+THROW
+
+LABEL inner_catch
+CATCH
+PUSH_STR "Caught in inner: "
+PRINT
+PRINT
+; Re-throw to outer handler
+PUSH_STR "Re-thrown from inner"
+THROW
+END_TRY
+
+PUSH_STR "This should not execute"
+PRINT
+END_TRY
+JMP end_program
+
+LABEL outer_catch
+CATCH  
+PUSH_STR "Caught in outer: "
+PRINT
+PRINT
+END_TRY
+
+LABEL end_program
+PUSH_STR "Program finished"
+PRINT
+HALT

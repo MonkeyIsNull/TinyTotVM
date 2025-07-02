@@ -1,0 +1,43 @@
+; Test basic exception handling
+JMP main
+
+LABEL main
+; Test 1: Basic try-catch
+TRY catch_block
+PUSH_STR "This is thrown"
+THROW
+
+LABEL catch_block  
+CATCH
+PRINT
+PUSH_STR "Exception caught!"
+PRINT
+END_TRY
+
+; Test 2: No exception thrown - try block completes normally
+TRY catch_block2
+PUSH_STR "Normal execution"
+PRINT
+END_TRY
+JMP after_catch2
+
+LABEL catch_block2
+CATCH
+PUSH_STR "This should not print"
+PRINT
+END_TRY
+
+LABEL after_catch2
+; Test 3: Throwing different value types
+TRY catch_block3
+PUSH_INT 42
+THROW
+
+LABEL catch_block3
+CATCH
+PUSH_STR "Caught integer: "
+PRINT
+PRINT
+END_TRY
+
+HALT

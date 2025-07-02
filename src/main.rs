@@ -55,6 +55,50 @@ enum Value {
     List(Vec<Value>),
     Object(HashMap<String, Value>),
     Function { addr: usize, params: Vec<String> },
+    Exception { message: String, stack_trace: Vec<String> },
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Float(n) => write!(f, "{}", n),
+            Value::Str(s) => write!(f, "{}", s),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Null => write!(f, "null"),
+            Value::List(items) => {
+                write!(f, "[")?;
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 { write!(f, ", ")?; }
+                    write!(f, "{}", item)?;
+                }
+                write!(f, "]")
+            },
+            Value::Object(map) => {
+                write!(f, "{{")?;
+                let mut first = true;
+                for (key, value) in map {
+                    if !first { write!(f, ", ")?; }
+                    write!(f, "{}: {}", key, value)?;
+                    first = false;
+                }
+                write!(f, "}}")
+            },
+            Value::Function { addr, params } => {
+                write!(f, "function@{} ({})", addr, params.join(", "))
+            },
+            Value::Exception { message, stack_trace } => {
+                write!(f, "Exception: {}", message)?;
+                if !stack_trace.is_empty() {
+                    write!(f, "\nStack trace:")?;
+                    for trace in stack_trace {
+                        write!(f, "\n  {}", trace)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +157,19 @@ enum OpCode {
     // Function operations
     MakeFunction { addr: usize, params: Vec<String> }, // create function pointer
     CallFunction,      // call function from stack
+    // Exception handling
+    Try { catch_addr: usize },  // start try block, jump to catch_addr on exception
+    Catch,             // start catch block (exception is on stack)
+    Throw,             // throw exception from stack
+    EndTry,            // end try block
+}
+
+#[derive(Debug, Clone)]
+struct ExceptionHandler {
+    catch_addr: usize,           // address to jump to on exception
+    stack_size: usize,           // stack size when try block started
+    call_stack_size: usize,      // call stack size when try block started
+    variable_frames: usize,      // number of variable frames when try block started
 }
 
 struct VM {
@@ -121,6 +178,8 @@ struct VM {
     ip: usize,                              // instruction pointer
     call_stack: Vec<usize>,                 // return addresses for CALL/RET
     variables: Vec<HashMap<String, Value>>, // call frame stack
+    // Exception handling
+    try_stack: Vec<ExceptionHandler>,       // stack of try blocks
     // Performance improvements
     max_stack_size: usize,                  // Track maximum stack usage
     instruction_count: usize,               // Count of executed instructions
@@ -137,6 +196,7 @@ impl VM {
             ip: 0,
             call_stack: Vec::with_capacity(64), // Pre-allocate call stack
             variables: vec![HashMap::new()], // global frame
+            try_stack: Vec::new(),
             max_stack_size: 0,
             instruction_count: 0,
             debug_mode: false,
@@ -217,6 +277,56 @@ impl VM {
         }
     }
 
+    // Exception handling methods
+    fn push_exception_handler(&mut self, catch_addr: usize) {
+        let handler = ExceptionHandler {
+            catch_addr,
+            stack_size: self.stack.len(),
+            call_stack_size: self.call_stack.len(),
+            variable_frames: self.variables.len(),
+        };
+        self.try_stack.push(handler);
+    }
+
+    fn pop_exception_handler(&mut self) -> Option<ExceptionHandler> {
+        self.try_stack.pop()
+    }
+
+    fn unwind_to_exception_handler(&mut self, handler: &ExceptionHandler) {
+        // Unwind stack to the state when try block started
+        self.stack.truncate(handler.stack_size);
+        
+        // Unwind call stack
+        self.call_stack.truncate(handler.call_stack_size);
+        
+        // Unwind variable frames
+        self.variables.truncate(handler.variable_frames);
+    }
+
+    fn throw_exception(&mut self, exception: Value) -> VMResult<()> {
+        if let Some(handler) = self.pop_exception_handler() {
+            // Unwind to the try block state
+            self.unwind_to_exception_handler(&handler);
+            
+            // Push the exception onto the stack for the catch block
+            self.stack.push(exception);
+            
+            // Jump to the catch block
+            self.ip = handler.catch_addr;
+            Ok(())
+        } else {
+            // No exception handler found, convert to VM error
+            match exception {
+                Value::Exception { message, .. } => {
+                    Err(VMError::ParseError { line: self.ip, instruction: format!("Unhandled exception: {}", message) })
+                }
+                _ => {
+                    Err(VMError::ParseError { line: self.ip, instruction: format!("Unhandled exception: {:?}", exception) })
+                }
+            }
+        }
+    }
+
     fn run(&mut self) -> VMResult<()> {
         while self.ip < self.instructions.len() {
             // Performance tracking
@@ -241,7 +351,43 @@ impl VM {
             }
 
             let instruction = &self.instructions[self.ip].clone();
-            match instruction {
+            
+            // Store original IP to detect jumps
+            let original_ip = self.ip;
+            
+            // Check for HALT instruction first
+            if matches!(instruction, OpCode::Halt) {
+                break;
+            }
+            
+            // Execute instruction and catch VM errors in try blocks
+            match self.execute_instruction_safe(instruction) {
+                Ok(()) => {
+                    // Only increment IP if instruction didn't change it
+                    if self.ip == original_ip {
+                        self.ip += 1;
+                    }
+                }
+                Err(vm_error) => {
+                    // If we're in a try block, convert VM error to exception
+                    if !self.try_stack.is_empty() {
+                        let exception = Value::Exception {
+                            message: vm_error.to_string(),
+                            stack_trace: vec![format!("at instruction {}", self.ip)]
+                        };
+                        self.throw_exception(exception)?;
+                        continue;
+                    } else {
+                        return Err(vm_error);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn execute_instruction_safe(&mut self, instruction: &OpCode) -> VMResult<()> {
+        match instruction {
                 OpCode::PushInt(n) => self.stack.push(Value::Int(*n)),
                 OpCode::PushFloat(f) => self.stack.push(Value::Float(*f)),
                 OpCode::PushStr(s) => self.stack.push(Value::Str(s.clone())),
@@ -332,11 +478,10 @@ impl VM {
                 }
                 OpCode::Print => {
                     let val = self.pop_stack("PRINT")?;
-                    println!("{:?}", val);
+                    println!("{}", val);
                 }
                 OpCode::Jmp(target) => {
                     self.ip = *target;
-                    continue;
                 }
                 OpCode::Jz(target) => {
                     let val = self.pop_stack("JZ")?;
@@ -348,7 +493,6 @@ impl VM {
                     };
                     if is_zero {
                         self.ip = *target;
-                        continue;
                     }
                 }
                 OpCode::Call{ addr, params } => {
@@ -361,12 +505,10 @@ impl VM {
                     }
                     self.variables.push(frame);
                     self.ip = *addr;
-                    continue;
                 }
                 OpCode::Ret => {
                     self.pop_variable_frame()?;
                     self.ip = self.pop_call_stack()?;
-                    continue;
                 }
                 OpCode::Sub => {
                     let b = self.pop_stack("SUB")?;
@@ -772,7 +914,6 @@ impl VM {
                             
                             // Jump to function
                             self.ip = addr;
-                            continue;
                         }
                         _ => return Err(VMError::TypeMismatch { 
                             expected: "a function".to_string(), 
@@ -822,12 +963,43 @@ impl VM {
                 OpCode::DumpScope => {
                     println!("Current scope: {:?}", self.variables.last());
                 }
-                OpCode::Halt => break,
+                // Exception handling opcodes
+                OpCode::Try { catch_addr } => {
+                    self.push_exception_handler(*catch_addr);
+                }
+                OpCode::Catch => {
+                    // The exception should already be on the stack from throw_exception
+                    // Nothing to do here, just mark that we're in the catch block
+                }
+                OpCode::Throw => {
+                    let exception_value = self.pop_stack("THROW")?;
+                    
+                    // Convert value to exception if it's not already one
+                    let exception = match exception_value {
+                        Value::Exception { .. } => exception_value,
+                        Value::Str(msg) => Value::Exception { 
+                            message: msg,
+                            stack_trace: vec![format!("at instruction {}", self.ip)]
+                        },
+                        other => Value::Exception {
+                            message: format!("Thrown value: {:?}", other),
+                            stack_trace: vec![format!("at instruction {}", self.ip)]
+                        }
+                    };
+                    
+                    self.throw_exception(exception)?;
+                }
+                OpCode::EndTry => {
+                    // Pop the exception handler when exiting try block normally
+                    self.pop_exception_handler();
+                }
+                OpCode::Halt => {
+                    // This should never be reached since HALT is handled in run()
+                    unreachable!("HALT instruction should be handled in run() method")
+                }
             }
-            self.ip += 1;
+            Ok(())
         }
-        Ok(())
-    }
 }
 
 fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
@@ -996,6 +1168,14 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 OpCode::MakeFunction { addr, params }
             }
             "CALL_FUNCTION" => OpCode::CallFunction,
+            "TRY" => {
+                let catch_label = parts[1].trim();
+                let catch_addr = *label_map.get(catch_label).ok_or_else(|| VMError::UnknownLabel(catch_label.to_string()))?;
+                OpCode::Try { catch_addr }
+            }
+            "CATCH" => OpCode::Catch,
+            "THROW" => OpCode::Throw,
+            "END_TRY" => OpCode::EndTry,
             "READ_FILE" => OpCode::ReadFile,
             "WRITE_FILE" => OpCode::WriteFile,
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),

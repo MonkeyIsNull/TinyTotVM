@@ -1,0 +1,44 @@
+; Test VM errors being automatically converted to exceptions
+JMP main
+
+LABEL main
+; Test division by zero in try block
+TRY catch_div_by_zero
+PUSH_FLOAT 10.0
+PUSH_FLOAT 0.0
+DIV_F
+PRINT
+
+LABEL catch_div_by_zero
+CATCH
+PUSH_STR "Caught VM error: "
+PRINT
+PRINT
+END_TRY
+
+; Test stack underflow in try block
+TRY catch_underflow
+; Try to pop from empty stack
+PRINT
+
+LABEL catch_underflow
+CATCH
+PUSH_STR "Caught stack underflow: "
+PRINT
+PRINT
+END_TRY
+
+; Test undefined variable in try block
+TRY catch_undefined
+LOAD nonexistent_var
+
+LABEL catch_undefined
+CATCH
+PUSH_STR "Caught undefined variable: "
+PRINT
+PRINT
+END_TRY
+
+PUSH_STR "All VM errors caught successfully!"
+PRINT
+HALT
