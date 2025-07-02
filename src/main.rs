@@ -1,8 +1,49 @@
 use std::collections::HashMap;
 use std::fs;
+use std::fmt;
 mod bytecode;
 mod compiler;
 mod lisp_compiler;
+
+#[derive(Debug, Clone)]
+pub enum VMError {
+    StackUnderflow(String),
+    TypeMismatch { expected: String, got: String, operation: String },
+    UndefinedVariable(String),
+    IndexOutOfBounds { index: usize, length: usize },
+    CallStackUnderflow,
+    NoVariableScope,
+    FileError { filename: String, error: String },
+    ParseError { line: usize, instruction: String },
+    InsufficientStackItems { needed: usize, available: usize },
+    UnknownLabel(String),
+}
+
+impl fmt::Display for VMError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VMError::StackUnderflow(op) => write!(f, "Stack underflow during {}", op),
+            VMError::TypeMismatch { expected, got, operation } => 
+                write!(f, "{} expects {} but got {}", operation, expected, got),
+            VMError::UndefinedVariable(name) => write!(f, "Undefined variable: {}", name),
+            VMError::IndexOutOfBounds { index, length } => 
+                write!(f, "Index {} out of bounds for list of length {}", index, length),
+            VMError::CallStackUnderflow => write!(f, "Call stack underflow"),
+            VMError::NoVariableScope => write!(f, "No variable scope available"),
+            VMError::FileError { filename, error } => 
+                write!(f, "File operation failed on {}: {}", filename, error),
+            VMError::ParseError { line, instruction } => 
+                write!(f, "Parse error on line {}: {}", line, instruction),
+            VMError::InsufficientStackItems { needed, available } => 
+                write!(f, "Need {} stack items but only {} available", needed, available),
+            VMError::UnknownLabel(label) => write!(f, "Unknown label: {}", label),
+        }
+    }
+}
+
+impl std::error::Error for VMError {}
+
+type VMResult<T> = Result<T, VMError>;
 
 #[derive(Debug, Clone)]
 enum Value {
@@ -13,7 +54,7 @@ enum Value {
     List(Vec<Value>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum OpCode {
     PushInt(i64),
     PushStr(String),
@@ -56,42 +97,155 @@ struct VM {
     ip: usize,                              // instruction pointer
     call_stack: Vec<usize>,                 // return addresses for CALL/RET
     variables: Vec<HashMap<String, Value>>, // call frame stack
+    // Performance improvements
+    max_stack_size: usize,                  // Track maximum stack usage
+    instruction_count: usize,               // Count of executed instructions
+    // Debugging support
+    debug_mode: bool,
+    breakpoints: Vec<usize>,
 }
 
 impl VM {
     fn new(instructions: Vec<OpCode>) -> Self {
         VM {
-            stack: Vec::new(),
+            stack: Vec::with_capacity(1024), // Pre-allocate stack capacity
             instructions,
             ip: 0,
-            call_stack: Vec::new(),
+            call_stack: Vec::with_capacity(64), // Pre-allocate call stack
             variables: vec![HashMap::new()], // global frame
+            max_stack_size: 0,
+            instruction_count: 0,
+            debug_mode: false,
+            breakpoints: Vec::new(),
         }
     }
 
-    fn run(&mut self) {
+    fn new_with_debug(instructions: Vec<OpCode>, debug_mode: bool) -> Self {
+        let mut vm = Self::new(instructions);
+        vm.debug_mode = debug_mode;
+        vm
+    }
+
+    #[allow(dead_code)]
+    fn add_breakpoint(&mut self, address: usize) {
+        if !self.breakpoints.contains(&address) {
+            self.breakpoints.push(address);
+            self.breakpoints.sort();
+        }
+    }
+
+    #[allow(dead_code)]
+    fn remove_breakpoint(&mut self, address: usize) {
+        self.breakpoints.retain(|&x| x != address);
+    }
+
+    fn get_stats(&self) -> (usize, usize, usize) {
+        (self.instruction_count, self.max_stack_size, self.stack.len())
+    }
+
+    // Safe stack operations
+    fn pop_stack(&mut self, operation: &str) -> VMResult<Value> {
+        self.stack.pop().ok_or_else(|| VMError::StackUnderflow(operation.to_string()))
+    }
+
+    fn peek_stack(&self, operation: &str) -> VMResult<&Value> {
+        self.stack.last().ok_or_else(|| VMError::StackUnderflow(operation.to_string()))
+    }
+
+    fn check_stack_size(&self, needed: usize, _operation: &str) -> VMResult<()> {
+        if self.stack.len() < needed {
+            Err(VMError::InsufficientStackItems { 
+                needed, 
+                available: self.stack.len() 
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn get_variable(&self, name: &str) -> VMResult<Value> {
+        self.variables
+            .last()
+            .ok_or(VMError::NoVariableScope)?
+            .get(name)
+            .cloned()
+            .ok_or_else(|| VMError::UndefinedVariable(name.to_string()))
+    }
+
+    fn set_variable(&mut self, name: String, value: Value) -> VMResult<()> {
+        self.variables
+            .last_mut()
+            .ok_or(VMError::NoVariableScope)?
+            .insert(name, value);
+        Ok(())
+    }
+
+    fn pop_call_stack(&mut self) -> VMResult<usize> {
+        self.call_stack.pop().ok_or(VMError::CallStackUnderflow)
+    }
+
+    fn pop_variable_frame(&mut self) -> VMResult<()> {
+        if self.variables.len() <= 1 {
+            Err(VMError::NoVariableScope)
+        } else {
+            self.variables.pop();
+            Ok(())
+        }
+    }
+
+    fn run(&mut self) -> VMResult<()> {
         while self.ip < self.instructions.len() {
-            match &self.instructions[self.ip] {
+            // Performance tracking
+            self.instruction_count += 1;
+            if self.stack.len() > self.max_stack_size {
+                self.max_stack_size = self.stack.len();
+            }
+
+            // Debugging support
+            if self.debug_mode {
+                println!("IP: {}, Instruction: {:?}, Stack size: {}", 
+                    self.ip, self.instructions[self.ip], self.stack.len());
+            }
+
+            // Breakpoint support
+            if self.breakpoints.contains(&self.ip) {
+                println!("Breakpoint hit at instruction {}: {:?}", 
+                    self.ip, self.instructions[self.ip]);
+                println!("Stack: {:?}", self.stack);
+                println!("Variables: {:?}", self.variables.last());
+                // In a real debugger, we'd wait for user input here
+            }
+
+            let instruction = &self.instructions[self.ip].clone();
+            match instruction {
                 OpCode::PushInt(n) => self.stack.push(Value::Int(*n)),
                 OpCode::PushStr(s) => self.stack.push(Value::Str(s.clone())),
                 OpCode::Add => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
-                    match (a, b) {
+                    let b = self.pop_stack("ADD")?;
+                    let a = self.pop_stack("ADD")?;
+                    match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x + y)),
-                        _ => panic!("ADD expects two integers"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two integers".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "ADD".to_string() 
+                        }),
                     }
                 }
                 OpCode::Concat => {
-                    let b = self.stack.pop().expect("stack underflow");
-                    let a = self.stack.pop().expect("stack underflow");
-                    match (a, b) {
-                        (Value::Str(x), Value::Str(y)) => self.stack.push(Value::Str(x + &y)),
-                        _ => panic!("CONCAT expects two strings"),
+                    let b = self.pop_stack("CONCAT")?;
+                    let a = self.pop_stack("CONCAT")?;
+                    match (&a, &b) {
+                        (Value::Str(x), Value::Str(y)) => self.stack.push(Value::Str(x.clone() + y)),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two strings".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "CONCAT".to_string() 
+                        }),
                     }
                 }
                 OpCode::Print => {
-                    let val = self.stack.pop().expect("stack underflow");
+                    let val = self.pop_stack("PRINT")?;
                     println!("{:?}", val);
                 }
                 OpCode::Jmp(target) => {
@@ -99,7 +253,7 @@ impl VM {
                     continue;
                 }
                 OpCode::Jz(target) => {
-                    let val = self.stack.pop().expect("stack underflow on JZ");
+                    let val = self.pop_stack("JZ")?;
                     let is_zero = match val {
                         Value::Int(0) => true,
                         Value::Bool(false) => true,
@@ -112,148 +266,182 @@ impl VM {
                     }
                 }
                 OpCode::Call{ addr, params } => {
-                    // Save return address
-                        self.call_stack.push(self.ip + 1);
-                        let mut frame = HashMap::new();
-                        // If params is empty, just push an empty frame
-                        for name in params.iter().rev() {
-                            let value = self.stack.pop().expect("stack underflow on CALL");
-                            frame.insert(name.clone(), value);
-                        }
-                        self.variables.push(frame);
-                        self.ip = *addr;
-                        continue;
+                    self.check_stack_size(params.len(), "CALL")?;
+                    self.call_stack.push(self.ip + 1);
+                    let mut frame = HashMap::new();
+                    for name in params.iter().rev() {
+                        let value = self.pop_stack("CALL")?;
+                        frame.insert(name.clone(), value);
+                    }
+                    self.variables.push(frame);
+                    self.ip = *addr;
+                    continue;
                 }
                 OpCode::Ret => {
-                    self.variables.pop().expect("call frame stack underflow");
-                    self.ip = self.call_stack.pop().expect("call stack underflow");
+                    self.pop_variable_frame()?;
+                    self.ip = self.pop_call_stack()?;
                     continue;
                 }
                 OpCode::Sub => {
-                    let b = self.stack.pop().expect("stack underflow on SUB");
-                    let a = self.stack.pop().expect("stack underflow on SUB");
-                    match (a, b) {
+                    let b = self.pop_stack("SUB")?;
+                    let a = self.pop_stack("SUB")?;
+                    match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x - y)),
-                        _ => panic!("SUB expects two integers"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two integers".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "SUB".to_string() 
+                        }),
                     }
                 }
                 OpCode::Dup => {
-                    let val = self.stack.last().expect("stack underflow on DUP").clone();
+                    let val = self.peek_stack("DUP")?.clone();
                     self.stack.push(val);
                 }
                 OpCode::Store(name) => {
-                    let val = self.stack.pop().expect("stack underflow on STORE");
-                    self.variables
-                        .last_mut()
-                        .expect("no variable scope")
-                        .insert(name.clone(), val);
+                    let val = self.pop_stack("STORE")?;
+                    self.set_variable(name.clone(), val)?;
                 }
                 OpCode::Load(name) => {
-                    let val = self
-                        .variables
-                        .last()
-                        .expect("no variable scope")
-                        .get(name)
-                        .unwrap_or_else(|| panic!("Undefined variable: {}", name))
-                        .clone();
+                    let val = self.get_variable(&name)?;
                     self.stack.push(val);
                 }
                 OpCode::Delete(name) => {
                     let removed = self
                         .variables
                         .last_mut()
-                        .expect("no variable scope")
+                        .ok_or(VMError::NoVariableScope)?
                         .remove(name);
                     if removed.is_none() {
                         eprintln!("Warning: tried to DELETE unknown variable '{}'", name);
                     }
                 }
                 OpCode::Eq => {
-                    let b = self.stack.pop().expect("stack underflow on EQ");
-                    let a = self.stack.pop().expect("stack underflow on EQ");
-                    let result = match (a, b) {
+                    let b = self.pop_stack("EQ")?;
+                    let a = self.pop_stack("EQ")?;
+                    let result = match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => x == y,
                         (Value::Str(x), Value::Str(y)) => x == y,
-                        _ => panic!("EQ requires values of the same type"),
+                        (Value::Bool(x), Value::Bool(y)) => x == y,
+                        (Value::Null, Value::Null) => true,
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "values of the same type".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "EQ".to_string() 
+                        }),
                     };
                     self.stack.push(Value::Int(if result { 1 } else { 0 }));
                 }
                 OpCode::Gt => {
-                    let b = self.stack.pop().expect("stack underflow on GT");
-                    let a = self.stack.pop().expect("stack underflow on GT");
-                    match (a, b) {
+                    let b = self.pop_stack("GT")?;
+                    let a = self.pop_stack("GT")?;
+                    match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => {
                             self.stack.push(Value::Int(if x > y { 1 } else { 0 }));
                         }
-                        _ => panic!("GT requires two integers"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two integers".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "GT".to_string() 
+                        }),
                     }
                 }
                 OpCode::Lt => {
-                    let b = self.stack.pop().expect("stack underflow on LT");
-                    let a = self.stack.pop().expect("stack underflow on LT");
-                    match (a, b) {
+                    let b = self.pop_stack("LT")?;
+                    let a = self.pop_stack("LT")?;
+                    match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => {
                             self.stack.push(Value::Int(if x < y { 1 } else { 0 }));
                         }
-                        _ => panic!("LT requires two integers"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two integers".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "LT".to_string() 
+                        }),
                     }
                 }
                 OpCode::Ne => {
-                    let b = self.stack.pop().expect("stack underflow on NE");
-                    let a = self.stack.pop().expect("stack underflow on NE");
-                    let result = match (a, b) {
+                    let b = self.pop_stack("NE")?;
+                    let a = self.pop_stack("NE")?;
+                    let result = match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => x != y,
                         (Value::Str(x), Value::Str(y)) => x != y,
-                        _ => panic!("NE requires values of the same type"),
+                        (Value::Bool(x), Value::Bool(y)) => x != y,
+                        (Value::Null, Value::Null) => false,
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "values of the same type".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "NE".to_string() 
+                        }),
                     };
                     self.stack.push(Value::Int(if result { 1 } else { 0 }));
                 }
                 OpCode::Ge => {
-                    let b = self.stack.pop().expect("stack underflow on GE");
-                    let a = self.stack.pop().expect("stack underflow on GE");
-                    match (a, b) {
+                    let b = self.pop_stack("GE")?;
+                    let a = self.pop_stack("GE")?;
+                    match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => {
                             self.stack.push(Value::Int(if x >= y { 1 } else { 0 }));
                         }
-                        _ => panic!("GE requires two integers"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two integers".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "GE".to_string() 
+                        }),
                     }
                 }
                 OpCode::Le => {
-                    let b = self.stack.pop().expect("stack underflow on LE");
-                    let a = self.stack.pop().expect("stack underflow on LE");
-                    match (a, b) {
+                    let b = self.pop_stack("LE")?;
+                    let a = self.pop_stack("LE")?;
+                    match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => {
                             self.stack.push(Value::Int(if x <= y { 1 } else { 0 }));
                         }
-                        _ => panic!("LE requires two integers"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two integers".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "LE".to_string() 
+                        }),
                     }
                 }
                 OpCode::True => self.stack.push(Value::Bool(true)),
                 OpCode::False => self.stack.push(Value::Bool(false)),
                 OpCode::Not => {
-                    let val = self.stack.pop().expect("stack underflow on NOT");
+                    let val = self.pop_stack("NOT")?;
                     let result = match val {
                         Value::Bool(b) => !b,
-                        Value::Int(i) => i == 0, // optional: treat 0 as false
-                        _ => panic!("NOT expects a Bool or Int"),
+                        Value::Int(i) => i == 0,
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "Bool or Int".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "NOT".to_string() 
+                        }),
                     };
                     self.stack.push(Value::Bool(result));
                 }
                 OpCode::And => {
-                    let b = self.stack.pop().expect("stack underflow on AND");
-                    let a = self.stack.pop().expect("stack underflow on AND");
-                    let result = match (a, b) {
-                        (Value::Bool(x), Value::Bool(y)) => x && y,
-                        _ => panic!("AND expects two Booleans"),
+                    let b = self.pop_stack("AND")?;
+                    let a = self.pop_stack("AND")?;
+                    let result = match (&a, &b) {
+                        (Value::Bool(x), Value::Bool(y)) => *x && *y,
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two Booleans".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "AND".to_string() 
+                        }),
                     };
                     self.stack.push(Value::Bool(result));
                 }
                 OpCode::Or => {
-                    let b = self.stack.pop().expect("stack underflow on OR");
-                    let a = self.stack.pop().expect("stack underflow on OR");
-                    let result = match (a, b) {
-                        (Value::Bool(x), Value::Bool(y)) => x || y,
-                        _ => panic!("OR expects two Booleans"),
+                    let b = self.pop_stack("OR")?;
+                    let a = self.pop_stack("OR")?;
+                    let result = match (&a, &b) {
+                        (Value::Bool(x), Value::Bool(y)) => *x || *y,
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two Booleans".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "OR".to_string() 
+                        }),
                     };
                     self.stack.push(Value::Bool(result));
                 }
@@ -261,58 +449,83 @@ impl VM {
                     self.stack.push(Value::Null);
                 }
                 OpCode::MakeList(n) => {
-                    if self.stack.len() < *n {
-                        panic!("Not enough values on stack for MAKE_LIST");
-                    }
+                    self.check_stack_size(*n, "MAKE_LIST")?;
                     let mut list = Vec::with_capacity(*n);
                     for _ in 0..*n {
-                        list.push(self.stack.pop().unwrap());
+                        list.push(self.pop_stack("MAKE_LIST")?);
                     }
-                    list.reverse(); // keep original order
+                    list.reverse();
                     self.stack.push(Value::List(list));
                 }
                 OpCode::Len => {
-                    let val = self.stack.pop().expect("stack underflow on LEN");
+                    let val = self.pop_stack("LEN")?;
                     match val {
                         Value::List(l) => self.stack.push(Value::Int(l.len() as i64)),
-                        _ => panic!("LEN expects a list"),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "a list".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "LEN".to_string() 
+                        }),
                     }
                 }
                 OpCode::Index => {
-                    let index = match self.stack.pop().expect("stack underflow on INDEX") {
+                    let index = match self.pop_stack("INDEX")? {
                         Value::Int(i) => i as usize,
-                        _ => panic!("INDEX expects an integer index"),
+                        val => return Err(VMError::TypeMismatch { 
+                            expected: "an integer index".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "INDEX".to_string() 
+                        }),
                     };
-                    let list = match self.stack.pop().expect("stack underflow on INDEX") {
+                    let list = match self.pop_stack("INDEX")? {
                         Value::List(l) => l,
-                        _ => panic!("INDEX expects a list"),
+                        val => return Err(VMError::TypeMismatch { 
+                            expected: "a list".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "INDEX".to_string() 
+                        }),
                     };
                     if index >= list.len() {
-                        panic!("Index out of bounds");
+                        return Err(VMError::IndexOutOfBounds { index, length: list.len() });
                     }
                     self.stack.push(list[index].clone());
                 }
                 OpCode::ReadFile => {
-                    let val = self.stack.pop().expect("stack underflow");
-                    if let Value::Str(filename) = val {
-                        match std::fs::read_to_string(&filename) {
-                            Ok(content) => self.stack.push(Value::Str(content)),
-                            Err(e) => panic!("Failed to read file {}: {}", filename, e),
+                    let val = self.pop_stack("READ_file")?;
+                    match val {
+                        Value::Str(filename) => {
+                            match std::fs::read_to_string(&filename) {
+                                Ok(content) => self.stack.push(Value::Str(content)),
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename, 
+                                    error: e.to_string() 
+                                }),
+                            }
                         }
-                    } else {
-                        panic!("READ_FILE expects a string filename");
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "a string filename".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "READ_FILE".to_string() 
+                        }),
                     }
                 }
                 OpCode::WriteFile => {
-                    let filename = self.stack.pop().expect("stack underflow");
-                    let content = self.stack.pop().expect("stack underflow");
+                    let filename = self.pop_stack("WRITE_FILE")?;
+                    let content = self.pop_stack("WRITE_FILE")?;
                     match (filename, content) {
                         (Value::Str(fname), Value::Str(body)) => {
-                            if let Err(e) = std::fs::write(&fname, body) {
-                                panic!("Failed to write to file {}: {}", fname, e);
+                            if let Err(e) = std::fs::write(&fname, &body) {
+                                return Err(VMError::FileError { 
+                                    filename: fname, 
+                                    error: e.to_string() 
+                                });
                             }
                         }
-                        _ => panic!("WRITE_FILE expects two strings (filename, content)"),
+                        (f, c) => return Err(VMError::TypeMismatch { 
+                            expected: "two strings (filename, content)".to_string(), 
+                            got: format!("{:?}, {:?}", f, c), 
+                            operation: "WRITE_FILE".to_string() 
+                        }),
                     }
                 }
                 OpCode::DumpScope => {
@@ -322,11 +535,15 @@ impl VM {
             }
             self.ip += 1;
         }
+        Ok(())
     }
 }
 
-fn parse_program(path: &str) -> Vec<OpCode> {
-    let content = fs::read_to_string(path).expect("Failed to read file");
+fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
+    let content = fs::read_to_string(path).map_err(|e| VMError::FileError { 
+        filename: path.to_string(), 
+        error: e.to_string() 
+    })?;
 
     let mut label_map: HashMap<String, usize> = HashMap::new();
     let mut instructions_raw: Vec<(usize, &str)> = Vec::new();
@@ -351,7 +568,10 @@ fn parse_program(path: &str) -> Vec<OpCode> {
         let parts: Vec<&str> = line.splitn(2, ' ').collect();
         let opcode = match parts[0] {
             "PUSH_INT" => {
-                let n = parts[1].parse::<i64>().expect("Invalid integer");
+                let n = parts[1].parse::<i64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid integer: {}", parts[1]) 
+                })?;
                 OpCode::PushInt(n)
             }
             "PUSH_STR" => {
@@ -365,19 +585,38 @@ fn parse_program(path: &str) -> Vec<OpCode> {
             "PRINT" => OpCode::Print,
             "HALT" => OpCode::Halt,
             "CALL" => {
-                let label = parts[1].trim();
-                let target = label_map.get(label).expect("Unknown label in CALL");
-                OpCode::Call { addr: *target, params: vec![] }
+                if parts.len() < 2 {
+                    return Err(VMError::ParseError { line: line_num, instruction: "CALL requires at least a target".to_string() });
+                }
+                let call_parts: Vec<&str> = parts[1].split_whitespace().collect();
+                let label = call_parts[0];
+                let params: Vec<String> = call_parts[1..].iter().map(|s| s.to_string()).collect();
+                
+                // Try parsing as number first, then as label
+                let target = if let Ok(addr) = label.parse::<usize>() {
+                    addr
+                } else {
+                    *label_map.get(label).ok_or_else(|| VMError::UnknownLabel(label.to_string()))?
+                };
+                OpCode::Call { addr: target, params }
             }
             "JMP" => {
                 let label = parts[1].trim();
-                let target = label_map.get(label).expect("Unknown label in JMP");
-                OpCode::Jmp(*target)
+                let target = if let Ok(addr) = label.parse::<usize>() {
+                    addr
+                } else {
+                    *label_map.get(label).ok_or_else(|| VMError::UnknownLabel(label.to_string()))?
+                };
+                OpCode::Jmp(target)
             }
             "JZ" => {
                 let label = parts[1].trim();
-                let target = label_map.get(label).expect("Unknown label in JZ");
-                OpCode::Jz(*target)
+                let target = if let Ok(addr) = label.parse::<usize>() {
+                    addr
+                } else {
+                    *label_map.get(label).ok_or_else(|| VMError::UnknownLabel(label.to_string()))?
+                };
+                OpCode::Jz(target)
             }
             "RET" => OpCode::Ret,
             "STORE" => {
@@ -405,22 +644,43 @@ fn parse_program(path: &str) -> Vec<OpCode> {
             "OR" => OpCode::Or,
             "NULL" => OpCode::Null,
             "MAKE_LIST" => {
-                let n = parts[1].parse::<usize>().expect("Invalid list size");
+                let n = parts[1].parse::<usize>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid list size: {}", parts[1]) 
+                })?;
                 OpCode::MakeList(n)
             }
             "LEN" => OpCode::Len,
             "INDEX" => OpCode::Index,
             "DUMP_SCOPE" => OpCode::DumpScope,
-            _ => panic!("Unknown instruction: {line} on line {line_num}"),
+            "READ_FILE" => OpCode::ReadFile,
+            "WRITE_FILE" => OpCode::WriteFile,
+            _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
         };
         program.push(opcode);
     }
 
-    program
+    Ok(program)
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: tinytotvm [--debug] <program.ttvm|program.ttb>");
+        eprintln!("       tinytotvm compile <input.ttvm> <output.ttb>");
+        eprintln!("       tinytotvm compile-lisp <input.lisp> <output.ttvm>");
+        std::process::exit(1);
+    }
+
+    let mut debug_mode = false;
+    let mut file_index = 1;
+
+    // Check for debug flag
+    if args.len() > 2 && args[1] == "--debug" {
+        debug_mode = true;
+        file_index = 2;
+    }
 
     if args.len() >= 2 && args[1] == "compile" {
         if args.len() != 4 {
@@ -434,10 +694,18 @@ fn main() {
         return;
     }
 
-    if args[1].ends_with(".ttb") {
-        let program = bytecode::load_bytecode(&args[1]).expect("Failed to load bytecode");
-        let mut vm = VM::new(program);
-        vm.run();
+    if args[file_index].ends_with(".ttb") {
+        let program = bytecode::load_bytecode(&args[file_index]).expect("Failed to load bytecode");
+        let mut vm = VM::new_with_debug(program, debug_mode);
+        if let Err(e) = vm.run() {
+            eprintln!("VM runtime error: {}", e);
+            std::process::exit(1);
+        }
+        if debug_mode {
+            let (instructions, max_stack, final_stack) = vm.get_stats();
+            println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
+                instructions, max_stack, final_stack);
+        }
         return;
     }
 
@@ -453,7 +721,21 @@ fn main() {
         return;
     }
 
-    let program = parse_program(&args[1]);
-    let mut vm = VM::new(program);
-    vm.run();
+    let program = match parse_program(&args[file_index]) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let mut vm = VM::new_with_debug(program, debug_mode);
+    if let Err(e) = vm.run() {
+        eprintln!("VM runtime error: {}", e);
+        std::process::exit(1);
+    }
+    if debug_mode {
+        let (instructions, max_stack, final_stack) = vm.get_stats();
+        println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
+            instructions, max_stack, final_stack);
+    }
 }
