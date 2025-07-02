@@ -1,0 +1,19 @@
+; Test type coercion between int and float
+PUSH_INT 5
+PUSH_FLOAT 3.14
+ADD
+PRINT
+
+; Test int - float
+PUSH_INT 10
+PUSH_FLOAT 2.5
+SUB
+PRINT
+
+; Test float + int
+PUSH_FLOAT 2.5
+PUSH_INT 3
+ADD
+PRINT
+
+HALT

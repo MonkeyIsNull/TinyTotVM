@@ -48,6 +48,7 @@ type VMResult<T> = Result<T, VMError>;
 #[derive(Debug, Clone)]
 enum Value {
     Int(i64),
+    Float(f64),
     Str(String),
     Bool(bool),
     Null,
@@ -57,8 +58,14 @@ enum Value {
 #[derive(Debug, Clone)]
 enum OpCode {
     PushInt(i64),
+    PushFloat(f64),
     PushStr(String),
     Add,
+    AddF,
+    Sub,
+    SubF,
+    MulF,
+    DivF,
     Concat,
     Print,
     Halt,
@@ -66,7 +73,6 @@ enum OpCode {
     Jz(usize),
     Call { addr: usize, params: Vec<String> },
     Ret,
-    Sub,
     Dup,
     Store(String),
     Load(String),
@@ -77,6 +83,12 @@ enum OpCode {
     Lt,
     Ge,
     Le,
+    EqF,
+    NeF,
+    GtF,
+    LtF,
+    GeF,
+    LeF,
     True,
     False,
     Not,
@@ -219,16 +231,78 @@ impl VM {
             let instruction = &self.instructions[self.ip].clone();
             match instruction {
                 OpCode::PushInt(n) => self.stack.push(Value::Int(*n)),
+                OpCode::PushFloat(f) => self.stack.push(Value::Float(*f)),
                 OpCode::PushStr(s) => self.stack.push(Value::Str(s.clone())),
                 OpCode::Add => {
                     let b = self.pop_stack("ADD")?;
                     let a = self.pop_stack("ADD")?;
                     match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x + y)),
+                        // Type coercion: int + float = float
+                        (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 + y)),
+                        (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x + *y as f64)),
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x + y)),
                         _ => return Err(VMError::TypeMismatch { 
-                            expected: "two integers".to_string(), 
+                            expected: "two numbers (int or float)".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
                             operation: "ADD".to_string() 
+                        }),
+                    }
+                }
+                OpCode::AddF => {
+                    let b = self.pop_stack("ADD_F")?;
+                    let a = self.pop_stack("ADD_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x + y)),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "ADD_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::SubF => {
+                    let b = self.pop_stack("SUB_F")?;
+                    let a = self.pop_stack("SUB_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x - y)),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "SUB_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::MulF => {
+                    let b = self.pop_stack("MUL_F")?;
+                    let a = self.pop_stack("MUL_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x * y)),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "MUL_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DivF => {
+                    let b = self.pop_stack("DIV_F")?;
+                    let a = self.pop_stack("DIV_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            if *y == 0.0 {
+                                return Err(VMError::TypeMismatch { 
+                                    expected: "non-zero divisor".to_string(), 
+                                    got: "zero".to_string(), 
+                                    operation: "DIV_F".to_string() 
+                                });
+                            }
+                            self.stack.push(Value::Float(x / y));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "DIV_F".to_string() 
                         }),
                     }
                 }
@@ -287,8 +361,12 @@ impl VM {
                     let a = self.pop_stack("SUB")?;
                     match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x - y)),
+                        // Type coercion: mixed int/float = float
+                        (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 - y)),
+                        (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x - *y as f64)),
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x - y)),
                         _ => return Err(VMError::TypeMismatch { 
-                            expected: "two integers".to_string(), 
+                            expected: "two numbers (int or float)".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
                             operation: "SUB".to_string() 
                         }),
@@ -321,6 +399,7 @@ impl VM {
                     let a = self.pop_stack("EQ")?;
                     let result = match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => x == y,
+                        (Value::Float(x), Value::Float(y)) => (x - y).abs() < f64::EPSILON,
                         (Value::Str(x), Value::Str(y)) => x == y,
                         (Value::Bool(x), Value::Bool(y)) => x == y,
                         (Value::Null, Value::Null) => true,
@@ -365,6 +444,7 @@ impl VM {
                     let a = self.pop_stack("NE")?;
                     let result = match (&a, &b) {
                         (Value::Int(x), Value::Int(y)) => x != y,
+                        (Value::Float(x), Value::Float(y)) => (x - y).abs() >= f64::EPSILON,
                         (Value::Str(x), Value::Str(y)) => x != y,
                         (Value::Bool(x), Value::Bool(y)) => x != y,
                         (Value::Null, Value::Null) => false,
@@ -401,6 +481,90 @@ impl VM {
                             expected: "two integers".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
                             operation: "LE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::EqF => {
+                    let b = self.pop_stack("EQ_F")?;
+                    let a = self.pop_stack("EQ_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            self.stack.push(Value::Int(if (x - y).abs() < f64::EPSILON { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "EQ_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::NeF => {
+                    let b = self.pop_stack("NE_F")?;
+                    let a = self.pop_stack("NE_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            self.stack.push(Value::Int(if (x - y).abs() >= f64::EPSILON { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "NE_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::GtF => {
+                    let b = self.pop_stack("GT_F")?;
+                    let a = self.pop_stack("GT_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            self.stack.push(Value::Int(if x > y { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "GT_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::LtF => {
+                    let b = self.pop_stack("LT_F")?;
+                    let a = self.pop_stack("LT_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            self.stack.push(Value::Int(if x < y { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "LT_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::GeF => {
+                    let b = self.pop_stack("GE_F")?;
+                    let a = self.pop_stack("GE_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            self.stack.push(Value::Int(if x >= y { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "GE_F".to_string() 
+                        }),
+                    }
+                }
+                OpCode::LeF => {
+                    let b = self.pop_stack("LE_F")?;
+                    let a = self.pop_stack("LE_F")?;
+                    match (&a, &b) {
+                        (Value::Float(x), Value::Float(y)) => {
+                            self.stack.push(Value::Int(if x <= y { 1 } else { 0 }));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two floats".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "LE_F".to_string() 
                         }),
                     }
                 }
@@ -574,12 +738,23 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 })?;
                 OpCode::PushInt(n)
             }
+            "PUSH_FLOAT" => {
+                let f = parts[1].parse::<f64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid float: {}", parts[1]) 
+                })?;
+                OpCode::PushFloat(f)
+            }
             "PUSH_STR" => {
                 let s = parts[1].trim_matches('"').to_string();
                 OpCode::PushStr(s)
             }
             "ADD" => OpCode::Add,
+            "ADD_F" => OpCode::AddF,
             "SUB" => OpCode::Sub,
+            "SUB_F" => OpCode::SubF,
+            "MUL_F" => OpCode::MulF,
+            "DIV_F" => OpCode::DivF,
             "DUP" => OpCode::Dup,
             "CONCAT" => OpCode::Concat,
             "PRINT" => OpCode::Print,
@@ -637,6 +812,12 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "NE" => OpCode::Ne,
             "GE" => OpCode::Ge,
             "LE" => OpCode::Le,
+            "EQ_F" => OpCode::EqF,
+            "GT_F" => OpCode::GtF,
+            "LT_F" => OpCode::LtF,
+            "NE_F" => OpCode::NeF,
+            "GE_F" => OpCode::GeF,
+            "LE_F" => OpCode::LeF,
             "TRUE" => OpCode::True,
             "FALSE" => OpCode::False,
             "NOT" => OpCode::Not,

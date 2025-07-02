@@ -1,0 +1,37 @@
+; Test float operations
+PUSH_FLOAT 3.14
+PUSH_FLOAT 2.5
+ADD_F
+PRINT
+
+; Test float subtraction
+PUSH_FLOAT 10.5
+PUSH_FLOAT 3.2
+SUB_F
+PRINT
+
+; Test float multiplication
+PUSH_FLOAT 2.5
+PUSH_FLOAT 4.0
+MUL_F
+PRINT
+
+; Test float division
+PUSH_FLOAT 15.0
+PUSH_FLOAT 3.0
+DIV_F
+PRINT
+
+; Test float comparison
+PUSH_FLOAT 3.14
+PUSH_FLOAT 3.14
+EQ_F
+PRINT
+
+; Test float greater than
+PUSH_FLOAT 5.5
+PUSH_FLOAT 3.2
+GT_F
+PRINT
+
+HALT
