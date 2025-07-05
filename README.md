@@ -1,5 +1,5 @@
 # TinyTotVM
-![TinyTotVM Logo](logo.png)
+![TinyTotVM Logo](tiny_tot_vm_logo.png)
 
 > „Ohne Kaffee keine Erleuchtung – auch nicht für Maschinen.“
 
