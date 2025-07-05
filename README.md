@@ -4,7 +4,9 @@
 > „Ohne Kaffee keine Erleuchtung – auch nicht für Maschinen.“
 
 **TinyTotVM** is a tiny, stack-based virtual machine written in Rust.
-This repo is, in essence, a toy-box for my experiments in writing a VM. It's not expected to be used for production usage in anything. That said, if you want to play around with it, have at it. At some point I'll update my long-term goals for and post them someplace here, at least so I remember them.
+
+
+This repo is, in essence, a toy-box for my experiments in writing a VM. It's not expected to be used for production usage in anything. That said, if you want to play around with it, have at it. At some point I'll update my long-term goals for it and post them someplace here, at least so I remember them.
 
 
 ## Demo
