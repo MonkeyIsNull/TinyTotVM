@@ -1,0 +1,41 @@
+; TinyTotVM Standard Library - Prelude Module
+; Imports commonly used functions from other standard library modules
+
+; Import essential modules
+IMPORT std/math.ttvm
+IMPORT std/string.ttvm
+IMPORT std/list.ttvm
+IMPORT std/convert.ttvm
+
+; Re-export commonly used functions for convenience
+
+; Math essentials
+EXPORT PI
+EXPORT E
+EXPORT abs
+EXPORT sqrt
+EXPORT max
+EXPORT min
+
+; String essentials
+EXPORT strlen
+EXPORT strcat
+EXPORT upper
+EXPORT lower
+EXPORT trim
+
+; List essentials
+EXPORT length
+EXPORT first
+EXPORT last
+EXPORT is_empty
+EXPORT sum
+
+; Type conversion essentials
+EXPORT to_string
+EXPORT to_int
+EXPORT to_float
+EXPORT to_bool
+EXPORT type_of
+
+HALT

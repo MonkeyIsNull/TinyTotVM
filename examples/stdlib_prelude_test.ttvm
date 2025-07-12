@@ -1,0 +1,41 @@
+; Test TinyTotVM Standard Library - Prelude Module
+
+IMPORT std/prelude.ttvm
+
+PUSH_STR "=== Standard Library Prelude Tests ==="
+PRINT
+
+; Test math functions from prelude
+PUSH_STR "Math from prelude:"
+PRINT
+LOAD PI
+PRINT
+
+PUSH_FLOAT 25.0
+LOAD sqrt
+CALL_FUNCTION
+PRINT
+
+; Test string functions from prelude  
+PUSH_STR "String from prelude:"
+PRINT
+PUSH_STR "Hello"
+PUSH_STR " World"
+LOAD strcat
+CALL_FUNCTION
+PRINT
+
+; Test type conversion from prelude
+PUSH_STR "Type conversion from prelude:"
+PRINT
+PUSH_INT 42
+LOAD to_string
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "somevalue"
+LOAD type_of
+CALL_FUNCTION
+PRINT
+
+HALT

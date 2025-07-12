@@ -1,0 +1,157 @@
+; TinyTotVM Standard Library - I/O Module
+; Provides I/O operations and data format utilities
+
+JMP main
+
+; Read file contents (wrapper around built-in READ_FILE)
+LABEL read_file_func
+LOAD filename
+READ_FILE
+RET
+
+; Write to file (wrapper around built-in WRITE_FILE)
+LABEL write_file_func
+LOAD filename
+LOAD content
+WRITE_FILE
+RET
+
+; Print with newline
+LABEL println_func
+LOAD value
+PRINT
+RET
+
+; Print without newline (same as PRINT for now)
+LABEL print_func
+LOAD value
+PRINT
+RET
+
+; Format string (simplified)
+LABEL format_func
+LOAD template
+LOAD value
+; Simple string formatting - just concatenate
+CONCAT
+RET
+
+; JSON-like object serialization (simplified)
+LABEL to_json_func
+LOAD obj
+; Simplified JSON serialization - return placeholder since we can't convert objects to strings
+PUSH_STR "{serialized_object}"
+RET
+
+; JSON-like parsing (simplified)
+LABEL from_json_func
+LOAD json_str
+; Simplified JSON parsing - just return a placeholder object
+MAKE_OBJECT
+PUSH_STR "parsed"
+SET_FIELD data
+RET
+
+; CSV row creation (simplified)
+LABEL to_csv_row_func
+LOAD list
+; Simplified CSV row - just return a comma-separated representation
+PUSH_STR "csv_row("
+LOAD list
+CONCAT
+PUSH_STR ")"
+CONCAT
+RET
+
+; CSV parsing (simplified)
+LABEL from_csv_func
+LOAD csv_str
+; Simplified CSV parsing - return a placeholder list
+PUSH_STR "parsed"
+PUSH_STR "csv"
+PUSH_STR "data"
+MAKE_LIST 3
+RET
+
+; Error logging
+LABEL log_error_func
+LOAD message
+PUSH_STR "ERROR: "
+LOAD message
+CONCAT
+PRINT
+RET
+
+; Info logging
+LABEL log_info_func
+LOAD message
+PUSH_STR "INFO: "
+LOAD message
+CONCAT
+PRINT
+RET
+
+; Debug logging
+LABEL log_debug_func
+LOAD message
+PUSH_STR "DEBUG: "
+LOAD message
+CONCAT
+PRINT
+RET
+
+LABEL main
+
+; Export file operations
+MAKE_FUNCTION read_file_func filename
+STORE read_file
+EXPORT read_file
+
+MAKE_FUNCTION write_file_func filename content
+STORE write_file
+EXPORT write_file
+
+; Export printing utilities
+MAKE_FUNCTION println_func value
+STORE println
+EXPORT println
+
+MAKE_FUNCTION print_func value
+STORE print_func_alias
+EXPORT print_func_alias
+
+MAKE_FUNCTION format_func template value
+STORE format
+EXPORT format
+
+; Export data format utilities
+MAKE_FUNCTION to_json_func obj
+STORE to_json
+EXPORT to_json
+
+MAKE_FUNCTION from_json_func json_str
+STORE from_json
+EXPORT from_json
+
+MAKE_FUNCTION to_csv_row_func list
+STORE to_csv_row
+EXPORT to_csv_row
+
+MAKE_FUNCTION from_csv_func csv_str
+STORE from_csv
+EXPORT from_csv
+
+; Export logging utilities
+MAKE_FUNCTION log_error_func message
+STORE log_error
+EXPORT log_error
+
+MAKE_FUNCTION log_info_func message
+STORE log_info
+EXPORT log_info
+
+MAKE_FUNCTION log_debug_func message
+STORE log_debug
+EXPORT log_debug
+
+HALT

@@ -1,0 +1,149 @@
+; TinyTotVM Standard Library - String Module
+; Provides string manipulation utilities
+
+JMP main
+
+; String length (simulated - TinyTotVM doesn't have native string length)
+; Returns a fixed value for demo purposes
+LABEL strlen_func
+LOAD str
+; In a real implementation, this would count characters
+; For now, return a placeholder
+PUSH_INT 10
+RET
+
+; String concatenation (already built-in with CONCAT, but wrapped for consistency)
+LABEL strcat_func
+LOAD str1
+LOAD str2
+CONCAT
+RET
+
+; String repeat function
+LABEL repeat_func
+LOAD str
+LOAD count
+PUSH_STR ""
+STORE result
+
+LABEL repeat_loop
+LOAD count
+PUSH_INT 0
+LE
+JZ repeat_continue
+LOAD result
+RET
+
+LABEL repeat_continue
+LOAD result
+LOAD str
+CONCAT
+STORE result
+LOAD count
+PUSH_INT 1
+SUB
+STORE count
+JMP repeat_loop
+
+; String upper case (simplified - only handles a-z)
+LABEL upper_func
+LOAD str
+; In a real implementation, this would iterate through characters
+; For demo, we'll return a modified version
+PUSH_STR "UPPER("
+LOAD str
+CONCAT
+PUSH_STR ")"
+CONCAT
+RET
+
+; String lower case (simplified - only handles A-Z)
+LABEL lower_func
+LOAD str
+; In a real implementation, this would iterate through characters
+; For demo, we'll return a modified version
+PUSH_STR "lower("
+LOAD str
+CONCAT
+PUSH_STR ")"
+CONCAT
+RET
+
+; String starts with prefix check (simplified)
+LABEL starts_with_func
+LOAD str
+LOAD prefix
+; Simplified implementation - just check if they're equal
+; In reality, this would check if str starts with prefix
+EQ
+RET
+
+; String ends with suffix check (simplified)
+LABEL ends_with_func
+LOAD str
+LOAD suffix
+; Simplified implementation - just check if they're equal
+; In reality, this would check if str ends with suffix
+EQ
+RET
+
+; String contains check (simplified)
+LABEL contains_func
+LOAD str
+LOAD substring
+; Simplified implementation - just check if they're equal
+; In reality, this would check if str contains substring
+EQ
+RET
+
+; String trim (removes whitespace - simplified)
+LABEL trim_func
+LOAD str
+; In a real implementation, this would remove leading/trailing whitespace
+PUSH_STR "trim("
+LOAD str
+CONCAT
+PUSH_STR ")"
+CONCAT
+RET
+
+LABEL main
+
+; Export string functions
+MAKE_FUNCTION strlen_func str
+STORE strlen
+EXPORT strlen
+
+MAKE_FUNCTION strcat_func str1 str2
+STORE strcat
+EXPORT strcat
+
+MAKE_FUNCTION repeat_func str count
+STORE repeat
+EXPORT repeat
+
+MAKE_FUNCTION upper_func str
+STORE upper
+EXPORT upper
+
+MAKE_FUNCTION lower_func str
+STORE lower
+EXPORT lower
+
+MAKE_FUNCTION starts_with_func str prefix
+STORE starts_with
+EXPORT starts_with
+
+MAKE_FUNCTION ends_with_func str suffix
+STORE ends_with
+EXPORT ends_with
+
+MAKE_FUNCTION contains_func str substring
+STORE contains
+EXPORT contains
+
+MAKE_FUNCTION trim_func str
+STORE trim
+EXPORT trim
+
+HALT
