@@ -551,7 +551,7 @@ echo "All tests passed!"
 
 ### **Installation**
 ```bash
-git clone https://github.com/yourusername/TinyTotVM
+git clone https://github.com/MonkeyIsNull/TinyTotVM
 cd TinyTotVM
 cargo build --release
 ```
