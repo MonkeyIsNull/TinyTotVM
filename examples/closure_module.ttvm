@@ -1,0 +1,54 @@
+; Module that exports closure-based utilities
+
+JMP main
+
+; Factory function for creating adders (adds a fixed amount)
+LABEL make_adder
+LOAD increment
+STORE add_value
+CAPTURE add_value
+MAKE_LAMBDA add_lambda x
+RET
+
+; Lambda that adds the captured value
+LABEL add_lambda  
+LOAD x
+LOAD add_value
+ADD
+RET
+
+; Factory for creating multipliers
+LABEL make_multiplier
+LOAD factor
+STORE mult_factor
+CAPTURE mult_factor
+MAKE_LAMBDA multiply_lambda x
+RET
+
+; Lambda that multiplies by captured factor
+LABEL multiply_lambda
+LOAD x
+LOAD mult_factor
+MUL_F
+RET
+
+LABEL main
+
+; Export adder factory
+MAKE_FUNCTION make_adder increment
+STORE adder_factory
+EXPORT adder_factory
+
+; Export multiplier factory  
+MAKE_FUNCTION make_multiplier factor
+STORE multiplier_factory
+EXPORT multiplier_factory
+
+; Export a pre-made double function
+PUSH_FLOAT 2.0
+MAKE_FUNCTION make_multiplier factor
+CALL_FUNCTION
+STORE double
+EXPORT double
+
+HALT

@@ -55,6 +55,7 @@ enum Value {
     List(Vec<Value>),
     Object(HashMap<String, Value>),
     Function { addr: usize, params: Vec<String> },
+    Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
 }
 
@@ -86,6 +87,13 @@ impl fmt::Display for Value {
             },
             Value::Function { addr, params } => {
                 write!(f, "function@{} ({})", addr, params.join(", "))
+            },
+            Value::Closure { addr, params, captured } => {
+                write!(f, "closure@{} ({}) [captured: {}]", 
+                    addr, 
+                    params.join(", "),
+                    captured.len()
+                )
             },
             Value::Exception { message, stack_trace } => {
                 write!(f, "Exception: {}", message)?;
@@ -157,6 +165,9 @@ enum OpCode {
     // Function operations
     MakeFunction { addr: usize, params: Vec<String> }, // create function pointer
     CallFunction,      // call function from stack
+    // Closure and lambda operations
+    MakeLambda { addr: usize, params: Vec<String> },   // create lambda/closure
+    Capture(String),   // capture variable for closure
     // Exception handling
     Try { catch_addr: usize },  // start try block, jump to catch_addr on exception
     Catch,             // start catch block (exception is on stack)
@@ -187,6 +198,8 @@ struct VM {
     exports: HashMap<String, Value>,        // exported symbols from this module
     loaded_modules: HashMap<String, HashMap<String, Value>>, // module_path -> exports
     loading_stack: Vec<String>,             // for circular dependency detection
+    // Closure support
+    lambda_captures: HashMap<String, Value>, // variables captured for current lambda
     // Performance improvements
     max_stack_size: usize,                  // Track maximum stack usage
     instruction_count: usize,               // Count of executed instructions
@@ -207,6 +220,7 @@ impl VM {
             exports: HashMap::new(),
             loaded_modules: HashMap::new(),
             loading_stack: Vec::new(),
+            lambda_captures: HashMap::new(),
             max_stack_size: 0,
             instruction_count: 0,
             debug_mode: false,
@@ -904,6 +918,23 @@ impl VM {
                     let function = Value::Function { addr: *addr, params: params.clone() };
                     self.stack.push(function);
                 }
+                OpCode::MakeLambda { addr, params } => {
+                    // Create closure with currently captured variables
+                    let closure = Value::Closure { 
+                        addr: *addr, 
+                        params: params.clone(),
+                        captured: self.lambda_captures.clone() 
+                    };
+                    self.stack.push(closure);
+                    
+                    // Clear captures for next lambda
+                    self.lambda_captures.clear();
+                }
+                OpCode::Capture(var_name) => {
+                    // Capture current value of variable for lambda
+                    let value = self.get_variable(var_name)?.clone();
+                    self.lambda_captures.insert(var_name.clone(), value);
+                }
                 OpCode::CallFunction => {
                     let function = self.pop_stack("CALL_FUNCTION")?;
                     match function {
@@ -925,8 +956,26 @@ impl VM {
                             // Jump to function
                             self.ip = addr;
                         }
+                        Value::Closure { addr, params, captured } => {
+                            // Check if we have enough arguments on the stack
+                            self.check_stack_size(params.len(), "CALL_FUNCTION")?;
+                            
+                            // Save return address
+                            self.call_stack.push(self.ip + 1);
+                            
+                            // Create new variable frame with captured variables and parameters
+                            let mut frame = captured; // Start with captured environment
+                            for name in params.iter().rev() {
+                                let value = self.pop_stack("CALL_FUNCTION")?;
+                                frame.insert(name.clone(), value); // Parameters override captured vars
+                            }
+                            self.variables.push(frame);
+                            
+                            // Jump to closure body
+                            self.ip = addr;
+                        }
                         _ => return Err(VMError::TypeMismatch { 
-                            expected: "a function".to_string(), 
+                            expected: "a function or closure".to_string(), 
                             got: format!("{:?}", function), 
                             operation: "CALL_FUNCTION".to_string() 
                         }),
@@ -1045,8 +1094,11 @@ impl VM {
         let base_addr = self.instructions.len();
         let mut adjusted_exports = HashMap::new();
         
-        // Append module instructions to main instruction space
-        self.instructions.extend(module_instructions.clone());
+        // Adjust addresses in module instructions and append to main instruction space
+        let adjusted_instructions = module_instructions.iter()
+            .map(|inst| self.adjust_instruction_addresses(inst, base_addr))
+            .collect::<Vec<_>>();
+        self.instructions.extend(adjusted_instructions);
         
         // Create a new VM with the module instructions to get exports
         // Share the loading context to detect circular dependencies
@@ -1063,15 +1115,7 @@ impl VM {
         
         // Adjust function addresses in exports to point to merged instruction space
         for (name, value) in module_vm.exports {
-            let adjusted_value = match value {
-                Value::Function { addr, params } => {
-                    Value::Function { 
-                        addr: addr + base_addr,  // Adjust address to merged space
-                        params 
-                    }
-                }
-                other => other
-            };
+            let adjusted_value = self.adjust_value_addresses(value, base_addr);
             adjusted_exports.insert(name, adjusted_value);
         }
         
@@ -1103,6 +1147,67 @@ impl VM {
         self.exports.insert(name.to_string(), value);
         
         Ok(())
+    }
+
+    fn adjust_value_addresses(&self, value: Value, base_addr: usize) -> Value {
+        match value {
+            Value::Function { addr, params } => {
+                Value::Function { 
+                    addr: addr + base_addr,
+                    params 
+                }
+            }
+            Value::Closure { addr, params, captured } => {
+                // Recursively adjust addresses in captured environment
+                let adjusted_captured = captured.into_iter()
+                    .map(|(name, val)| (name, self.adjust_value_addresses(val, base_addr)))
+                    .collect();
+                
+                Value::Closure { 
+                    addr: addr + base_addr,
+                    params,
+                    captured: adjusted_captured
+                }
+            }
+            Value::List(items) => {
+                let adjusted_items = items.into_iter()
+                    .map(|item| self.adjust_value_addresses(item, base_addr))
+                    .collect();
+                Value::List(adjusted_items)
+            }
+            Value::Object(map) => {
+                let adjusted_map = map.into_iter()
+                    .map(|(key, val)| (key, self.adjust_value_addresses(val, base_addr)))
+                    .collect();
+                Value::Object(adjusted_map)
+            }
+            // Other value types don't contain addresses
+            other => other
+        }
+    }
+
+    fn adjust_instruction_addresses(&self, instruction: &OpCode, base_addr: usize) -> OpCode {
+        match instruction {
+            OpCode::Jmp(addr) => OpCode::Jmp(addr + base_addr),
+            OpCode::Jz(addr) => OpCode::Jz(addr + base_addr),
+            OpCode::Call { addr, params } => OpCode::Call { 
+                addr: addr + base_addr, 
+                params: params.clone() 
+            },
+            OpCode::MakeFunction { addr, params } => OpCode::MakeFunction { 
+                addr: addr + base_addr, 
+                params: params.clone() 
+            },
+            OpCode::MakeLambda { addr, params } => OpCode::MakeLambda { 
+                addr: addr + base_addr, 
+                params: params.clone() 
+            },
+            OpCode::Try { catch_addr } => OpCode::Try { 
+                catch_addr: catch_addr + base_addr 
+            },
+            // All other instructions don't contain addresses
+            other => other.clone()
+        }
     }
 }
 
@@ -1272,6 +1377,30 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 OpCode::MakeFunction { addr, params }
             }
             "CALL_FUNCTION" => OpCode::CallFunction,
+            "MAKE_LAMBDA" => {
+                if parts.len() < 2 {
+                    return Err(VMError::ParseError { line: line_num, instruction: line.to_string() });
+                }
+                
+                let remaining_parts: Vec<&str> = parts[1].split_whitespace().collect();
+                if remaining_parts.is_empty() {
+                    return Err(VMError::ParseError { line: line_num, instruction: line.to_string() });
+                }
+                
+                let label = remaining_parts[0];
+                let params = remaining_parts[1..].iter().map(|s| s.to_string()).collect();
+                
+                let addr = if let Ok(addr) = label.parse::<usize>() {
+                    addr
+                } else {
+                    *label_map.get(label).ok_or_else(|| VMError::UnknownLabel(label.to_string()))?
+                };
+                OpCode::MakeLambda { addr, params }
+            }
+            "CAPTURE" => {
+                let var = parts[1].trim().to_string();
+                OpCode::Capture(var)
+            }
             "TRY" => {
                 let catch_label = parts[1].trim();
                 let catch_addr = *label_map.get(catch_label).ok_or_else(|| VMError::UnknownLabel(catch_label.to_string()))?;

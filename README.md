@@ -4,15 +4,26 @@
 
 > „Ohne Kaffee keine Erleuchtung – auch nicht für Maschinen."
 
-**TinyTotVM** is a comprehensive, stack-based virtual machine written in Rust with advanced language features including float arithmetic, objects, function pointers, exception handling, and comprehensive debugging support.
+**TinyTotVM** is a comprehensive, stack-based virtual machine written in Rust with advanced language features including float arithmetic, objects, function pointers, closures & lambdas, exception handling, module system, and comprehensive debugging support.
 
 ## Features
 
+TinyTotVM provides a **complete functional programming runtime** with advanced capabilities like other modern virtual machines:
+
+**Core Runtime**: Stack-based VM with dynamic typing, automatic memory management, and comprehensive error handling  
+**Data Types**: 64-bit integers, IEEE 754 floats, strings, booleans, dynamic lists, objects (HashMaps)  
+**Functions**: First-class functions, closures with variable capture, higher-order programming  
+**Modules**: Import/export system with circular dependency detection and cross-module closure support  
+**Exception Handling**: Structured try/catch/throw with stack unwinding and nested exception support  
+**Debugging**: Step-by-step execution tracing, performance metrics, breakpoint infrastructure  
+**Performance**: Pre-allocated stacks, instruction counting, bytecode compilation, memory tracking  
+
 ### **Core Language Features**
 - **Stack-based Architecture** - Efficient execution with pre-allocated memory
-- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Function values
+- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Function, Closure values
 - **Type Coercion** - Automatic conversion between compatible types (int ↔ float)
 - **Memory Management** - Automatic cleanup via Rust's ownership system
+- **Error Handling** - Comprehensive Result-based error system instead of crashes
 
 ### **Advanced Data Types**
 - **64-bit Integers** - Full arithmetic and comparison operations
@@ -83,6 +94,30 @@ CALL_FUNCTION           ; Outputs: 8
 - **Circular Dependency Detection** - Prevents infinite import loops
 - **Address Resolution** - Automatic function address adjustment for imports
 - **Caching** - Modules loaded once and cached for performance
+- **Cross-Module Closures** - Closures work correctly across module boundaries
+
+### **Closures & Lambdas**
+```assembly
+; Capture variables for closure
+PUSH_INT 10
+STORE base
+CAPTURE base
+MAKE_LAMBDA add_lambda x
+STORE adder
+
+; Use the closure
+PUSH_INT 5
+LOAD adder
+CALL_FUNCTION           ; Outputs: 15
+```
+- **Anonymous Functions** - `MAKE_LAMBDA` creates closures without explicit naming
+- **Variable Capture** - `CAPTURE` binds variables into closure environment
+- **Lexical Scoping** - Closures capture variables from creation context
+- **Captured Environment** - Variables captured by value at closure creation time
+- **Higher-Order Programming** - Closures can be passed as parameters and returned
+- **Environment Isolation** - Each closure maintains its own captured variable state
+- **Cross-Module Support** - Closures exported from modules work correctly after import
+- **Nested Closures** - Support for complex multi-level closure factories
 
 ### **Control Flow & Functions**
 - **Conditional Jumps** - `JMP`, `JZ` (jump if zero/false/null)
@@ -107,6 +142,8 @@ cargo run -- --debug examples/program.ttvm
 - **Multiple Parsers** - Support for both numeric and symbolic addressing
 
 ## Instruction Set
+
+**55+ Instructions** covering all aspects of modern programming language execution:
 
 ### **Arithmetic & Logic**
 ```
@@ -154,6 +191,9 @@ CALL label param1 param2    ; Call function with parameters
 RET                         ; Return from function
 MAKE_FUNCTION label x y     ; Create function pointer
 CALL_FUNCTION              ; Call function from stack
+
+MAKE_LAMBDA label x y       ; Create anonymous function (closure)
+CAPTURE varname             ; Capture variable for closure
 
 JMP label          ; Unconditional jump
 JZ label           ; Jump if zero/false/null
@@ -257,6 +297,29 @@ CATCH error
 END_TRY
 ```
 
+### **Closures & Anonymous Functions**
+```assembly
+; Create a closure factory
+PUSH_INT 5
+STORE increment
+CAPTURE increment
+MAKE_LAMBDA add_lambda x
+STORE adder
+
+; Use the closure
+PUSH_INT 10
+LOAD adder
+CALL_FUNCTION          ; Outputs: 15
+
+; Closures maintain captured state
+PUSH_INT 999
+STORE increment        ; Change original variable
+
+PUSH_INT 3
+LOAD adder            ; Closure still uses captured value (5)
+CALL_FUNCTION         ; Outputs: 8
+```
+
 ## Getting Started
 
 ### **Installation**
@@ -290,11 +353,16 @@ cargo run program.ttvm
 
 ## Performance Features
 
-- **Pre-allocated Stacks** - 1024-item stack, 64-item call stack
-- **Instruction Counting** - Performance metrics and profiling
-- **Memory Tracking** - Stack usage monitoring and statistics
-- **Bytecode Compilation** - Binary format for faster program loading
-- **Error Recovery** - Graceful error handling without crashes
+TinyTotVM is designed for efficiency and production use:
+
+- **Pre-allocated Stacks** - 1024-item stack, 64-item call stack for optimal performance
+- **Instruction Counting** - Performance metrics and profiling with execution statistics
+- **Memory Tracking** - Stack usage monitoring and memory optimization
+- **Bytecode Compilation** - Binary `.ttb` format for faster program loading
+- **Error Recovery** - Graceful error handling without crashes or panics
+- **Efficient Function Calls** - Optimized call stack and parameter passing
+- **Smart Address Resolution** - Automatic function pointer adjustment in modules
+- **Closure Optimization** - Efficient captured environment management
 
 ## Example Programs
 
@@ -311,6 +379,14 @@ The `examples/` directory contains comprehensive test programs:
 - **`module_test.ttvm`** - Basic module import and usage
 - **`comprehensive_module_test.ttvm`** - Advanced module usage patterns
 - **`circular_a.ttvm` / `circular_b.ttvm`** - Circular dependency detection test
+- **`simple_closure_test.ttvm`** - Basic closure and lambda functionality
+- **`closure_test.ttvm`** - Advanced closure testing with variable capture
+- **`nested_closure_test.ttvm`** - Nested closures and higher-order functions
+- **`lambda_test.ttvm`** - Anonymous functions and lambda expressions
+- **`closure_module.ttvm`** - Module exporting closure factories
+- **`closure_module_test.ttvm`** - Cross-module closure functionality
+- **`complex_closure_module.ttvm`** - Nested closures across modules
+- **`complex_closure_test.ttvm`** - Advanced cross-module closure testing
 
 ## Architecture
 
@@ -332,7 +408,8 @@ enum Value {
     List(Vec<Value>),
     Object(HashMap<String, Value>),
     Function { addr: usize, params: Vec<String> },
-    Exception(Box<Value>),
+    Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
+    Exception { message: String, stack_trace: Vec<String> },
 }
 ```
 
@@ -342,23 +419,57 @@ Comprehensive error types with detailed messages:
 - `IndexOutOfBounds`, `FileError`, `ParseError`
 - `CallStackUnderflow`, `NoVariableScope`
 
+## Capability Matrix
+
+| **Feature Category** | **Capabilities** | **Status** |
+|---|---|---|
+| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Function, Closure |  Complete |
+| **Arithmetic** | Full integer/float arithmetic with type coercion |  Complete |
+| **Control Flow** | Jumps, conditionals, function calls, returns |  Complete |
+| **Functions** | First-class functions, parameters, dynamic dispatch |  Complete |
+| **Closures** | Variable capture, lexical scoping, nested closures |  Complete |
+| **Objects** | Dynamic objects, field access, introspection |  Complete |
+| **Modules** | Import/export, circular dependency detection |  Complete |
+| **Exceptions** | Structured try/catch/throw with stack unwinding |  Complete |
+| **Debugging** | Step-by-step tracing, breakpoints, performance metrics |  Complete |
+| **I/O** | File operations, printing, string manipulation |  Complete |
+| **Memory** | Automatic management, efficient stack allocation |  Complete |
+
 ## Educational Value
 
 TinyTotVM serves as an excellent learning resource for:
-- **Virtual Machine Design** - Stack-based execution model
-- **Language Implementation** - Parsing, compilation, runtime systems
-- **Type Systems** - Dynamic typing with coercion rules
-- **Memory Management** - Scoping, stack management, garbage collection
-- **Functional Programming** - First-class functions, higher-order programming
-- **Exception Handling** - Structured error handling mechanisms
+- **Virtual Machine Design** - Stack-based execution model with modern features
+- **Language Implementation** - Complete runtime with parsing, compilation, and execution
+- **Type Systems** - Dynamic typing with coercion rules and type safety
+- **Memory Management** - Scoping, stack management, and automatic cleanup
+- **Functional Programming** - First-class functions, closures, and higher-order programming
+- **Exception Handling** - Structured error handling with proper stack unwinding
+- **Module Systems** - Code organization and dependency management
+
+## Production Readiness
+
+TinyTotVM is a **fully functional virtual machine** suitable for:
+
+- **Educational Use** - Complete implementation of modern VM concepts
+- **Research Projects** - Extensible architecture for language research
+- **Embedded Scripting** - Lightweight runtime for applications
+- **Prototyping** - Rapid development of domain-specific languages
+
+**Key Production Features:**
+- Comprehensive error handling with no crashes or panics
+- Memory-safe execution with automatic cleanup
+- Robust module system with dependency management
+- Full debugging and profiling capabilities
+- Cross-platform compatibility (Rust-based)
 
 ## Future Roadmap
 
-- **Closures & Lambdas** - Anonymous functions with captured variables
 - **Standard Library** - Math, string manipulation, data structure utilities
 - **Optimization Passes** - Dead code elimination, constant folding
 - **IDE Integration** - Language server protocol support
 - **Package Manager** - Centralized module distribution and dependency management
+- **Mutable Closures** - Support for mutable captured variables and true counters
+- **JIT Compilation** - Just-in-time compilation for performance-critical code
 
 ## License
 

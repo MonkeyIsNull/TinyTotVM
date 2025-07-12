@@ -1,0 +1,38 @@
+; Complex closure module with nested closures
+
+JMP main
+
+; Factory that returns a closure that returns another closure
+LABEL make_nested_adder
+LOAD base
+STORE outer_value
+CAPTURE outer_value
+MAKE_LAMBDA inner_factory step
+RET
+
+; Inner factory that creates the actual adder
+LABEL inner_factory
+LOAD step
+STORE step_value
+CAPTURE step_value
+CAPTURE outer_value  ; Capture from outer scope
+MAKE_LAMBDA nested_add x
+RET
+
+; The actual addition function with double capture
+LABEL nested_add
+LOAD x
+LOAD step_value
+ADD
+LOAD outer_value
+ADD
+RET
+
+LABEL main
+
+; Export the nested closure factory
+MAKE_FUNCTION make_nested_adder base
+STORE nested_factory
+EXPORT nested_factory
+
+HALT

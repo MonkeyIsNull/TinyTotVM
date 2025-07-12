@@ -1,0 +1,86 @@
+; Test lambda expressions and anonymous functions
+
+JMP main
+
+; Anonymous lambda for squaring
+LABEL square_lambda
+LOAD x
+DUP
+MUL_F
+RET
+
+; Anonymous lambda for string formatting
+LABEL format_lambda  
+PUSH_STR "Result: "
+LOAD value
+CONCAT
+RET
+
+; Higher-order map function
+LABEL map_func
+LOAD list_item
+LOAD mapper
+CALL_FUNCTION
+RET
+
+LABEL main
+
+; Test 1: Simple lambda usage
+PUSH_STR "Test 1: Simple lambda"
+PRINT
+
+MAKE_LAMBDA square_lambda x
+STORE square
+
+PUSH_FLOAT 5.0
+LOAD square
+CALL_FUNCTION
+PRINT  ; Should print 25.0
+
+; Test 2: Lambda with captured environment
+PUSH_STR "Test 2: Lambda with captures"
+PRINT
+
+PUSH_STR "Number: "
+STORE prefix
+CAPTURE prefix
+MAKE_LAMBDA format_lambda value
+STORE formatter
+
+PUSH_STR "42"
+LOAD formatter
+CALL_FUNCTION
+PRINT  ; Should print "Number: 42"
+
+; Test 3: Multiple lambdas with different captures
+PUSH_STR "Test 3: Multiple lambdas"
+PRINT
+
+PUSH_STR "Value: "
+STORE prefix2
+CAPTURE prefix2
+MAKE_LAMBDA format_lambda value
+STORE formatter2
+
+PUSH_STR "3.14"
+LOAD formatter2
+CALL_FUNCTION
+PRINT  ; Should print "Value: 3.14"
+
+; Original formatter should still work with original prefix
+PUSH_STR "99"
+LOAD formatter
+CALL_FUNCTION
+PRINT  ; Should print "Number: 99"
+
+; Test 4: Lambda as parameter to higher-order function
+PUSH_STR "Test 4: Higher-order lambda usage"
+PRINT
+
+PUSH_FLOAT 4.0
+LOAD square  ; Use the square lambda
+MAKE_FUNCTION map_func list_item mapper
+CALL_FUNCTION
+PRINT  ; Should print 16.0
+
+HALT

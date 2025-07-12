@@ -1,0 +1,66 @@
+; Test closures with module system
+
+IMPORT examples/closure_module.ttvm
+
+; Test 1: Using exported closure factories
+PUSH_STR "Test 1: Adder factory"
+PRINT
+
+PUSH_INT 10
+LOAD adder_factory
+CALL_FUNCTION
+STORE add10
+
+PUSH_INT 5
+LOAD add10
+CALL_FUNCTION
+PRINT  ; Should print 15
+
+PUSH_INT 3
+LOAD add10
+CALL_FUNCTION
+PRINT  ; Should print 13
+
+; Test 2: Multiple adders with different increments
+PUSH_STR "Test 2: Multiple adders"
+PRINT
+
+PUSH_INT 100
+LOAD adder_factory
+CALL_FUNCTION
+STORE add100
+
+PUSH_INT 7
+LOAD add100
+CALL_FUNCTION
+PRINT  ; Should print 107
+
+PUSH_INT 2
+LOAD add10
+CALL_FUNCTION
+PRINT  ; Should print 12
+
+; Test 3: Multiplier factory
+PUSH_STR "Test 3: Multiplier factory"
+PRINT
+
+PUSH_FLOAT 3.0
+LOAD multiplier_factory
+CALL_FUNCTION
+STORE triple
+
+PUSH_FLOAT 5.0
+LOAD triple
+CALL_FUNCTION
+PRINT  ; Should print 15.0
+
+; Test 4: Pre-made double function
+PUSH_STR "Test 4: Pre-made double"
+PRINT
+
+PUSH_FLOAT 7.5
+LOAD double
+CALL_FUNCTION
+PRINT  ; Should print 15.0
+
+HALT
