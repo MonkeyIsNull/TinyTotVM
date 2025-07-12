@@ -171,7 +171,7 @@ CALL_FUNCTION          ; Outputs: sum of elements
 - **String Utilities** - Concatenation, repetition, case conversion, trimming
 - **List Operations** - Length, first/last, higher-order functions (map, filter, reduce)
 - **Type Conversion** - Convert between types with safety checks
-- **I/O Utilities** - File operations, JSON/CSV handling, logging functions
+- **I/O Utilities** - Very basic File operations
 - **Prelude Module** - Common functions imported together for convenience
 
 ### **Advanced Optimization Engine**
