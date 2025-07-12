@@ -1,0 +1,66 @@
+; Complete Optimization Showcase
+; Demonstrates all 8 optimization passes working together
+
+PUSH_STR "=== TinyTotVM Complete Optimization Showcase ==="
+PRINT
+
+; Constant folding + propagation
+PUSH_INT 10
+PUSH_INT 5
+ADD            ; Folds to PUSH_INT 15
+STORE total
+LOAD total     ; Propagates to PUSH_INT 15
+PRINT
+
+; Peephole optimization
+TRUE
+NOT
+NOT            ; Optimizes to TRUE
+PRINT
+
+; Instruction combining
+PUSH_INT 0
+JZ skip_section  ; Combines to JMP skip_section
+
+PUSH_STR "This will be skipped due to optimization"
+PRINT
+
+LABEL skip_section
+
+; Dead code elimination  
+JMP final_section
+
+PUSH_STR "This is unreachable dead code"
+STORE unused
+LOAD unused
+PRINT
+PUSH_INT 999
+ADD
+PRINT
+
+LABEL final_section
+
+; More constant folding
+PUSH_FLOAT 3.0
+PUSH_FLOAT 4.0
+MUL_F          ; Folds to PUSH_FLOAT 12.0
+PRINT
+
+; Self-comparison (instruction combining)
+PUSH_INT 42
+DUP
+EQ             ; Combines to TRUE
+PRINT
+
+PUSH_STR "Optimization showcase complete!"
+PRINT
+
+HALT
+
+; Everything after HALT is dead code
+PUSH_STR "Dead code after HALT"
+PRINT
+PUSH_INT 1
+PUSH_INT 2
+ADD
+PRINT

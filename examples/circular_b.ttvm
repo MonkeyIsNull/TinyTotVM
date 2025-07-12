@@ -1,0 +1,8 @@
+; Module B that imports A (circular dependency test)
+
+IMPORT examples/circular_a.ttvm
+
+PUSH_STR "Module B loaded"
+PRINT
+
+HALT

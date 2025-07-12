@@ -1,0 +1,190 @@
+; Comprehensive TinyTotVM Standard Library Test
+; Demonstrates the complete standard library ecosystem
+
+IMPORT std/math.ttvm
+IMPORT std/string.ttvm
+IMPORT std/list.ttvm
+IMPORT std/convert.ttvm
+IMPORT std/io.ttvm
+
+PUSH_STR "======================================="
+PRINT
+PUSH_STR "TinyTotVM Standard Library Demo"
+PRINT
+PUSH_STR "======================================="
+PRINT
+
+; === Math Library Demo ===
+PUSH_STR ""
+PRINT
+PUSH_STR "=== Math Library ==="
+PRINT
+
+PUSH_STR "Mathematical constants:"
+PRINT
+LOAD PI
+PRINT
+LOAD E
+PRINT
+
+PUSH_STR "abs(-42.5) ="
+PRINT
+PUSH_FLOAT -42.5
+LOAD abs
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "sqrt(100) ="
+PRINT
+PUSH_FLOAT 100.0
+LOAD sqrt
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "max(15, 27) ="
+PRINT
+PUSH_FLOAT 15.0
+PUSH_FLOAT 27.0
+LOAD max
+CALL_FUNCTION
+PRINT
+
+; === String Library Demo ===
+PUSH_STR ""
+PRINT
+PUSH_STR "=== String Library ==="
+PRINT
+
+PUSH_STR "String concatenation:"
+PRINT
+PUSH_STR "Hello, "
+PUSH_STR "Standard Library!"
+LOAD strcat
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "String repeat 'Hi' 4 times:"
+PRINT
+PUSH_STR "Hi"
+PUSH_INT 4
+LOAD repeat
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "Upper case transformation:"
+PRINT
+PUSH_STR "tiny tot vm"
+LOAD upper
+CALL_FUNCTION
+PRINT
+
+; === List Library Demo ===
+PUSH_STR ""
+PRINT
+PUSH_STR "=== List Library ==="
+PRINT
+
+PUSH_STR "Creating and manipulating lists:"
+PRINT
+PUSH_INT 1
+PUSH_INT 2
+PUSH_INT 3
+MAKE_LIST 3
+STORE demo_list
+
+LOAD demo_list
+LOAD length
+CALL_FUNCTION
+PRINT
+
+LOAD demo_list
+LOAD first
+CALL_FUNCTION
+PRINT
+
+LOAD demo_list
+LOAD last
+CALL_FUNCTION
+PRINT
+
+; === Type Conversion Demo ===
+PUSH_STR ""
+PRINT
+PUSH_STR "=== Type Conversion ==="
+PRINT
+
+PUSH_STR "Converting values to strings:"
+PRINT
+PUSH_INT 123
+LOAD to_string
+CALL_FUNCTION
+PRINT
+
+PUSH_FLOAT 456.789
+LOAD to_string
+CALL_FUNCTION
+PRINT
+
+; === I/O Library Demo ===
+PUSH_STR ""
+PRINT
+PUSH_STR "=== I/O Library ==="
+PRINT
+
+PUSH_STR "Logging utilities:"
+PRINT
+PUSH_STR "This is an info message"
+LOAD log_info
+CALL_FUNCTION
+
+PUSH_STR "This is an error message"
+LOAD log_error
+CALL_FUNCTION
+
+PUSH_STR "JSON-like serialization:"
+PRINT
+MAKE_OBJECT
+PUSH_STR "TinyTotVM"
+SET_FIELD name
+PUSH_FLOAT 1.0
+SET_FIELD version
+LOAD to_json
+CALL_FUNCTION
+PRINT
+
+; === Combined Usage Demo ===
+PUSH_STR ""
+PRINT
+PUSH_STR "=== Combined Usage ==="
+PRINT
+
+PUSH_STR "Using multiple libraries together:"
+PRINT
+
+; Calculate area of circle using PI from math library
+PUSH_STR "Circle area calculation (r=5):"
+PRINT
+PUSH_FLOAT 5.0
+DUP
+MUL_F  ; r^2
+LOAD PI
+MUL_F  ; * PI
+PRINT
+
+; Create formatted string using string utilities
+PUSH_STR "Formatted result: "
+PUSH_STR "Area = "
+LOAD strcat
+CALL_FUNCTION
+PRINT
+
+PUSH_STR ""
+PRINT
+PUSH_STR "======================================="
+PRINT
+PUSH_STR "Standard Library Demo Complete!"
+PRINT
+PUSH_STR "======================================="
+PRINT
+
+HALT

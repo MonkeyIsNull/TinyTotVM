@@ -4,6 +4,7 @@ use std::fmt;
 mod bytecode;
 mod compiler;
 mod lisp_compiler;
+mod optimizer;
 
 #[derive(Debug, Clone)]
 pub enum VMError {
@@ -55,6 +56,7 @@ enum Value {
     List(Vec<Value>),
     Object(HashMap<String, Value>),
     Function { addr: usize, params: Vec<String> },
+    Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
 }
 
@@ -86,6 +88,13 @@ impl fmt::Display for Value {
             },
             Value::Function { addr, params } => {
                 write!(f, "function@{} ({})", addr, params.join(", "))
+            },
+            Value::Closure { addr, params, captured } => {
+                write!(f, "closure@{} ({}) [captured: {}]", 
+                    addr, 
+                    params.join(", "),
+                    captured.len()
+                )
             },
             Value::Exception { message, stack_trace } => {
                 write!(f, "Exception: {}", message)?;
@@ -157,11 +166,17 @@ enum OpCode {
     // Function operations
     MakeFunction { addr: usize, params: Vec<String> }, // create function pointer
     CallFunction,      // call function from stack
+    // Closure and lambda operations
+    MakeLambda { addr: usize, params: Vec<String> },   // create lambda/closure
+    Capture(String),   // capture variable for closure
     // Exception handling
     Try { catch_addr: usize },  // start try block, jump to catch_addr on exception
     Catch,             // start catch block (exception is on stack)
     Throw,             // throw exception from stack
     EndTry,            // end try block
+    // Module system
+    Import(String),    // import module by path
+    Export(String),    // export variable/function by name
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +195,12 @@ struct VM {
     variables: Vec<HashMap<String, Value>>, // call frame stack
     // Exception handling
     try_stack: Vec<ExceptionHandler>,       // stack of try blocks
+    // Module system
+    exports: HashMap<String, Value>,        // exported symbols from this module
+    loaded_modules: HashMap<String, HashMap<String, Value>>, // module_path -> exports
+    loading_stack: Vec<String>,             // for circular dependency detection
+    // Closure support
+    lambda_captures: HashMap<String, Value>, // variables captured for current lambda
     // Performance improvements
     max_stack_size: usize,                  // Track maximum stack usage
     instruction_count: usize,               // Count of executed instructions
@@ -197,6 +218,10 @@ impl VM {
             call_stack: Vec::with_capacity(64), // Pre-allocate call stack
             variables: vec![HashMap::new()], // global frame
             try_stack: Vec::new(),
+            exports: HashMap::new(),
+            loaded_modules: HashMap::new(),
+            loading_stack: Vec::new(),
+            lambda_captures: HashMap::new(),
             max_stack_size: 0,
             instruction_count: 0,
             debug_mode: false,
@@ -894,6 +919,23 @@ impl VM {
                     let function = Value::Function { addr: *addr, params: params.clone() };
                     self.stack.push(function);
                 }
+                OpCode::MakeLambda { addr, params } => {
+                    // Create closure with currently captured variables
+                    let closure = Value::Closure { 
+                        addr: *addr, 
+                        params: params.clone(),
+                        captured: self.lambda_captures.clone() 
+                    };
+                    self.stack.push(closure);
+                    
+                    // Clear captures for next lambda
+                    self.lambda_captures.clear();
+                }
+                OpCode::Capture(var_name) => {
+                    // Capture current value of variable for lambda
+                    let value = self.get_variable(var_name)?.clone();
+                    self.lambda_captures.insert(var_name.clone(), value);
+                }
                 OpCode::CallFunction => {
                     let function = self.pop_stack("CALL_FUNCTION")?;
                     match function {
@@ -915,8 +957,26 @@ impl VM {
                             // Jump to function
                             self.ip = addr;
                         }
+                        Value::Closure { addr, params, captured } => {
+                            // Check if we have enough arguments on the stack
+                            self.check_stack_size(params.len(), "CALL_FUNCTION")?;
+                            
+                            // Save return address
+                            self.call_stack.push(self.ip + 1);
+                            
+                            // Create new variable frame with captured variables and parameters
+                            let mut frame = captured; // Start with captured environment
+                            for name in params.iter().rev() {
+                                let value = self.pop_stack("CALL_FUNCTION")?;
+                                frame.insert(name.clone(), value); // Parameters override captured vars
+                            }
+                            self.variables.push(frame);
+                            
+                            // Jump to closure body
+                            self.ip = addr;
+                        }
                         _ => return Err(VMError::TypeMismatch { 
-                            expected: "a function".to_string(), 
+                            expected: "a function or closure".to_string(), 
                             got: format!("{:?}", function), 
                             operation: "CALL_FUNCTION".to_string() 
                         }),
@@ -993,6 +1053,12 @@ impl VM {
                     // Pop the exception handler when exiting try block normally
                     self.pop_exception_handler();
                 }
+                OpCode::Import(path) => {
+                    self.import_module(path)?;
+                }
+                OpCode::Export(name) => {
+                    self.export_symbol(name)?;
+                }
                 OpCode::Halt => {
                     // This should never be reached since HALT is handled in run()
                     unreachable!("HALT instruction should be handled in run() method")
@@ -1000,6 +1066,150 @@ impl VM {
             }
             Ok(())
         }
+
+    fn import_module(&mut self, path: &str) -> VMResult<()> {
+        // Check for circular dependencies using global loading stack
+        if self.loading_stack.contains(&path.to_string()) {
+            return Err(VMError::FileError {
+                filename: path.to_string(),
+                error: "Circular dependency detected".to_string(),
+            });
+        }
+
+        // Check if module is already loaded
+        if let Some(exports) = self.loaded_modules.get(path).cloned() {
+            // Module already loaded, import its exports into current scope
+            for (name, value) in exports {
+                self.set_variable(name, value)?;
+            }
+            return Ok(());
+        }
+
+        // Add to loading stack to detect circular dependencies
+        self.loading_stack.push(path.to_string());
+
+        // Load and parse the module
+        let module_instructions = parse_program(path)?;
+        
+        // Merge module instructions into main VM's instruction space
+        let base_addr = self.instructions.len();
+        let mut adjusted_exports = HashMap::new();
+        
+        // Adjust addresses in module instructions and append to main instruction space
+        let adjusted_instructions = module_instructions.iter()
+            .map(|inst| self.adjust_instruction_addresses(inst, base_addr))
+            .collect::<Vec<_>>();
+        self.instructions.extend(adjusted_instructions);
+        
+        // Create a new VM with the module instructions to get exports
+        // Share the loading context to detect circular dependencies
+        let mut module_vm = VM::new(module_instructions);
+        module_vm.debug_mode = self.debug_mode;
+        module_vm.loading_stack = self.loading_stack.clone(); // Share loading context
+        module_vm.loaded_modules = self.loaded_modules.clone(); // Share loaded modules
+        
+        // Run the module to generate exports
+        module_vm.run()?;
+        
+        // Update our loaded modules with any new modules the sub-module loaded
+        self.loaded_modules.extend(module_vm.loaded_modules);
+        
+        // Adjust function addresses in exports to point to merged instruction space
+        for (name, value) in module_vm.exports {
+            let adjusted_value = self.adjust_value_addresses(value, base_addr);
+            adjusted_exports.insert(name, adjusted_value);
+        }
+        
+        // Cache the loaded module
+        self.loaded_modules.insert(path.to_string(), adjusted_exports.clone());
+        
+        // Import the exports into current scope
+        if self.debug_mode {
+            println!("Importing {} exports from module {}", adjusted_exports.len(), path);
+        }
+        for (name, value) in adjusted_exports {
+            if self.debug_mode {
+                println!("Importing export: {} = {:?}", name, value);
+            }
+            self.set_variable(name, value)?;
+        }
+        
+        // Remove from loading stack
+        self.loading_stack.pop();
+        
+        Ok(())
+    }
+
+    fn export_symbol(&mut self, name: &str) -> VMResult<()> {
+        // Get the value from current scope
+        let value = self.get_variable(name)?.clone();
+        
+        // Add to exports
+        self.exports.insert(name.to_string(), value);
+        
+        Ok(())
+    }
+
+    fn adjust_value_addresses(&self, value: Value, base_addr: usize) -> Value {
+        match value {
+            Value::Function { addr, params } => {
+                Value::Function { 
+                    addr: addr + base_addr,
+                    params 
+                }
+            }
+            Value::Closure { addr, params, captured } => {
+                // Recursively adjust addresses in captured environment
+                let adjusted_captured = captured.into_iter()
+                    .map(|(name, val)| (name, self.adjust_value_addresses(val, base_addr)))
+                    .collect();
+                
+                Value::Closure { 
+                    addr: addr + base_addr,
+                    params,
+                    captured: adjusted_captured
+                }
+            }
+            Value::List(items) => {
+                let adjusted_items = items.into_iter()
+                    .map(|item| self.adjust_value_addresses(item, base_addr))
+                    .collect();
+                Value::List(adjusted_items)
+            }
+            Value::Object(map) => {
+                let adjusted_map = map.into_iter()
+                    .map(|(key, val)| (key, self.adjust_value_addresses(val, base_addr)))
+                    .collect();
+                Value::Object(adjusted_map)
+            }
+            // Other value types don't contain addresses
+            other => other
+        }
+    }
+
+    fn adjust_instruction_addresses(&self, instruction: &OpCode, base_addr: usize) -> OpCode {
+        match instruction {
+            OpCode::Jmp(addr) => OpCode::Jmp(addr + base_addr),
+            OpCode::Jz(addr) => OpCode::Jz(addr + base_addr),
+            OpCode::Call { addr, params } => OpCode::Call { 
+                addr: addr + base_addr, 
+                params: params.clone() 
+            },
+            OpCode::MakeFunction { addr, params } => OpCode::MakeFunction { 
+                addr: addr + base_addr, 
+                params: params.clone() 
+            },
+            OpCode::MakeLambda { addr, params } => OpCode::MakeLambda { 
+                addr: addr + base_addr, 
+                params: params.clone() 
+            },
+            OpCode::Try { catch_addr } => OpCode::Try { 
+                catch_addr: catch_addr + base_addr 
+            },
+            // All other instructions don't contain addresses
+            other => other.clone()
+        }
+    }
 }
 
 fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
@@ -1168,6 +1378,30 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 OpCode::MakeFunction { addr, params }
             }
             "CALL_FUNCTION" => OpCode::CallFunction,
+            "MAKE_LAMBDA" => {
+                if parts.len() < 2 {
+                    return Err(VMError::ParseError { line: line_num, instruction: line.to_string() });
+                }
+                
+                let remaining_parts: Vec<&str> = parts[1].split_whitespace().collect();
+                if remaining_parts.is_empty() {
+                    return Err(VMError::ParseError { line: line_num, instruction: line.to_string() });
+                }
+                
+                let label = remaining_parts[0];
+                let params = remaining_parts[1..].iter().map(|s| s.to_string()).collect();
+                
+                let addr = if let Ok(addr) = label.parse::<usize>() {
+                    addr
+                } else {
+                    *label_map.get(label).ok_or_else(|| VMError::UnknownLabel(label.to_string()))?
+                };
+                OpCode::MakeLambda { addr, params }
+            }
+            "CAPTURE" => {
+                let var = parts[1].trim().to_string();
+                OpCode::Capture(var)
+            }
             "TRY" => {
                 let catch_label = parts[1].trim();
                 let catch_addr = *label_map.get(catch_label).ok_or_else(|| VMError::UnknownLabel(catch_label.to_string()))?;
@@ -1178,6 +1412,20 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "END_TRY" => OpCode::EndTry,
             "READ_FILE" => OpCode::ReadFile,
             "WRITE_FILE" => OpCode::WriteFile,
+            "IMPORT" => {
+                let path = parts[1].trim();
+                // Remove quotes if present
+                let path = if path.starts_with('"') && path.ends_with('"') {
+                    path[1..path.len()-1].to_string()
+                } else {
+                    path.to_string()
+                };
+                OpCode::Import(path)
+            }
+            "EXPORT" => {
+                let name = parts[1].trim().to_string();
+                OpCode::Export(name)
+            }
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
         };
         program.push(opcode);
@@ -1186,71 +1434,240 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
     Ok(program)
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: tinytotvm [--debug] <program.ttvm|program.ttb>");
-        eprintln!("       tinytotvm compile <input.ttvm> <output.ttb>");
-        eprintln!("       tinytotvm compile-lisp <input.lisp> <output.ttvm>");
-        std::process::exit(1);
-    }
-
-    let mut debug_mode = false;
-    let mut file_index = 1;
-
-    // Check for debug flag
-    if args.len() > 2 && args[1] == "--debug" {
-        debug_mode = true;
-        file_index = 2;
-    }
-
-    if args.len() >= 2 && args[1] == "compile" {
-        if args.len() != 4 {
-            eprintln!("Usage: tinytotvm compile <input.ttvm> <output.ttb>");
-            std::process::exit(1);
-        }
-        let input = &args[2];
-        let output = &args[3];
-        compiler::compile(input, output).expect("Compilation failed");
-        println!("Compiled to {}", output);
-        return;
-    }
-
-    if args[file_index].ends_with(".ttb") {
-        let program = bytecode::load_bytecode(&args[file_index]).expect("Failed to load bytecode");
-        let mut vm = VM::new_with_debug(program, debug_mode);
-        if let Err(e) = vm.run() {
-            eprintln!("VM runtime error: {}", e);
-            std::process::exit(1);
-        }
-        if debug_mode {
-            let (instructions, max_stack, final_stack) = vm.get_stats();
-            println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
-                instructions, max_stack, final_stack);
-        }
-        return;
-    }
-
-    if args[1] == "compile-lisp" {
-        if args.len() != 4 {
-            eprintln!("Usage: tinytotvm compile-lisp <input.lisp> <output.ttvm>");
-            std::process::exit(1);
-        }
-        let input = &args[2];
-        let output = &args[3];
-        lisp_compiler::compile_lisp(input, output);
-        println!("Compiled Lisp to {}", output);
-        return;
-    }
-
-    let program = match parse_program(&args[file_index]) {
+fn optimize_program(input_file: &str, output_file: &str) {
+    let program = match parse_program(input_file) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Parse error: {}", e);
             std::process::exit(1);
         }
     };
+
+    let mut optimizer = optimizer::Optimizer::new(optimizer::OptimizationOptions::default());
+    let analysis_before = optimizer.analyze_program(&program);
+    
+    println!("=== Program Analysis (Before Optimization) ===");
+    println!("Total instructions: {}", analysis_before.total_instructions);
+    println!("Constants: {}", analysis_before.constant_count);
+    println!("Function calls: {}", analysis_before.call_count);
+    println!("Memory operations: {}", analysis_before.memory_op_count);
+    println!("Jumps: {}", analysis_before.jump_count);
+    println!();
+
+    let (optimized_program, stats) = optimizer.optimize(program);
+    let analysis_after = optimizer.analyze_program(&optimized_program);
+
+    println!("=== Optimization Results ===");
+    println!("Instructions: {} -> {} ({})", 
+        analysis_before.total_instructions, 
+        analysis_after.total_instructions,
+        analysis_before.total_instructions as i32 - analysis_after.total_instructions as i32);
+    println!("Constants folded: {}", stats.constants_folded);
+    println!("Dead instructions removed: {}", stats.dead_instructions_removed);
+    println!("Tail calls optimized: {}", stats.tail_calls_optimized);
+    println!("Memory operations optimized: {}", stats.memory_operations_optimized);
+    println!("Peephole optimizations: {}", stats.peephole_optimizations_applied);
+    println!("Constants propagated: {}", stats.constants_propagated);
+    println!("Instructions combined: {}", stats.instructions_combined);
+    println!("Jumps threaded: {}", stats.jumps_threaded);
+    println!();
+
+    // Write optimized program to file
+    match write_optimized_program(&optimized_program, output_file) {
+        Ok(_) => println!("Optimized program written to {}", output_file),
+        Err(e) => {
+            eprintln!("Failed to write optimized program: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Result<()> {
+    let mut output = String::new();
+    
+    for (_i, instruction) in program.iter().enumerate() {
+        let line = match instruction {
+            OpCode::PushInt(n) => format!("PUSH_INT {}", n),
+            OpCode::PushFloat(f) => format!("PUSH_FLOAT {}", f),
+            OpCode::PushStr(s) => format!("PUSH_STR \"{}\"", s.replace("\"", "\\\"")),
+            OpCode::Add => "ADD".to_string(),
+            OpCode::AddF => "ADD_F".to_string(),
+            OpCode::Sub => "SUB".to_string(),
+            OpCode::SubF => "SUB_F".to_string(),
+            OpCode::MulF => "MUL_F".to_string(),
+            OpCode::DivF => "DIV_F".to_string(),
+            OpCode::Concat => "CONCAT".to_string(),
+            OpCode::Print => "PRINT".to_string(),
+            OpCode::Halt => "HALT".to_string(),
+            OpCode::Jmp(addr) => format!("JMP {}", addr),
+            OpCode::Jz(addr) => format!("JZ {}", addr),
+            OpCode::Call { addr, params } => format!("CALL {} {}", addr, params.join(" ")),
+            OpCode::Ret => "RET".to_string(),
+            OpCode::Dup => "DUP".to_string(),
+            OpCode::Store(var) => format!("STORE {}", var),
+            OpCode::Load(var) => format!("LOAD {}", var),
+            OpCode::Delete(var) => format!("DELETE {}", var),
+            OpCode::Eq => "EQ".to_string(),
+            OpCode::Ne => "NE".to_string(),
+            OpCode::Gt => "GT".to_string(),
+            OpCode::Lt => "LT".to_string(),
+            OpCode::Ge => "GE".to_string(),
+            OpCode::Le => "LE".to_string(),
+            OpCode::EqF => "EQ_F".to_string(),
+            OpCode::NeF => "NE_F".to_string(),
+            OpCode::GtF => "GT_F".to_string(),
+            OpCode::LtF => "LT_F".to_string(),
+            OpCode::GeF => "GE_F".to_string(),
+            OpCode::LeF => "LE_F".to_string(),
+            OpCode::True => "TRUE".to_string(),
+            OpCode::False => "FALSE".to_string(),
+            OpCode::Not => "NOT".to_string(),
+            OpCode::And => "AND".to_string(),
+            OpCode::Or => "OR".to_string(),
+            OpCode::Null => "NULL".to_string(),
+            OpCode::MakeList(n) => format!("MAKE_LIST {}", n),
+            OpCode::Len => "LEN".to_string(),
+            OpCode::Index => "INDEX".to_string(),
+            OpCode::DumpScope => "DUMP_SCOPE".to_string(),
+            OpCode::ReadFile => "READ_FILE".to_string(),
+            OpCode::WriteFile => "WRITE_FILE".to_string(),
+            OpCode::MakeObject => "MAKE_OBJECT".to_string(),
+            OpCode::SetField(field) => format!("SET_FIELD {}", field),
+            OpCode::GetField(field) => format!("GET_FIELD {}", field),
+            OpCode::HasField(field) => format!("HAS_FIELD {}", field),
+            OpCode::DeleteField(field) => format!("DELETE_FIELD {}", field),
+            OpCode::Keys => "KEYS".to_string(),
+            OpCode::MakeFunction { addr, params } => format!("MAKE_FUNCTION {} {}", addr, params.join(" ")),
+            OpCode::CallFunction => "CALL_FUNCTION".to_string(),
+            OpCode::MakeLambda { addr, params } => format!("MAKE_LAMBDA {} {}", addr, params.join(" ")),
+            OpCode::Capture(var) => format!("CAPTURE {}", var),
+            OpCode::Try { catch_addr } => format!("TRY {}", catch_addr),
+            OpCode::Catch => "CATCH".to_string(),
+            OpCode::Throw => "THROW".to_string(),
+            OpCode::EndTry => "END_TRY".to_string(),
+            OpCode::Import(path) => format!("IMPORT {}", path),
+            OpCode::Export(name) => format!("EXPORT {}", name),
+        };
+        output.push_str(&line);
+        output.push('\n');
+    }
+    
+    std::fs::write(output_file, output)
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: tinytotvm [--debug] [--optimize] <program.ttvm|program.ttb>");
+        eprintln!("       tinytotvm compile <input.ttvm> <output.ttb>");
+        eprintln!("       tinytotvm compile-lisp <input.lisp> <output.ttvm>");
+        eprintln!("       tinytotvm optimize <input.ttvm> <output.ttvm>");
+        std::process::exit(1);
+    }
+
+    let mut debug_mode = false;
+    let mut optimize_mode = false;
+    let mut file_index = 1;
+
+    // Check for flags
+    while file_index < args.len() && args[file_index].starts_with("--") {
+        match args[file_index].as_str() {
+            "--debug" => {
+                debug_mode = true;
+                file_index += 1;
+            }
+            "--optimize" => {
+                optimize_mode = true;
+                file_index += 1;
+            }
+            _ => {
+                eprintln!("Unknown flag: {}", args[file_index]);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Handle special commands
+    if file_index < args.len() {
+        match args[file_index].as_str() {
+            "compile" => {
+                if args.len() != file_index + 3 {
+                    eprintln!("Usage: tinytotvm compile <input.ttvm> <output.ttb>");
+                    std::process::exit(1);
+                }
+                let input = &args[file_index + 1];
+                let output = &args[file_index + 2];
+                compiler::compile(input, output).expect("Compilation failed");
+                println!("Compiled to {}", output);
+                return;
+            }
+            "optimize" => {
+                if args.len() != file_index + 3 {
+                    eprintln!("Usage: tinytotvm optimize <input.ttvm> <output.ttvm>");
+                    std::process::exit(1);
+                }
+                let input = &args[file_index + 1];
+                let output = &args[file_index + 2];
+                optimize_program(input, output);
+                return;
+            }
+            "compile-lisp" => {
+                if args.len() != file_index + 3 {
+                    eprintln!("Usage: tinytotvm compile-lisp <input.lisp> <output.ttvm>");
+                    std::process::exit(1);
+                }
+                let input = &args[file_index + 1];
+                let output = &args[file_index + 2];
+                lisp_compiler::compile_lisp(input, output);
+                println!("Compiled Lisp to {}", output);
+                return;
+            }
+            _ => {
+                // Normal execution, continue below
+            }
+        }
+    }
+
+    // Normal execution
+    let mut program = if args[file_index].ends_with(".ttb") {
+        bytecode::load_bytecode(&args[file_index]).expect("Failed to load bytecode")
+    } else {
+        match parse_program(&args[file_index]) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Parse error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    // Apply optimizations if requested
+    if optimize_mode {
+        let mut optimizer = optimizer::Optimizer::new(optimizer::OptimizationOptions::default());
+        let analysis_before = optimizer.analyze_program(&program);
+        
+        let (optimized_program, stats) = optimizer.optimize(program);
+        program = optimized_program;
+        
+        let analysis_after = optimizer.analyze_program(&program);
+        
+        println!("=== Optimization Results ===");
+        println!("Instructions: {} -> {} ({})", 
+            analysis_before.total_instructions, 
+            analysis_after.total_instructions,
+            analysis_before.total_instructions as i32 - analysis_after.total_instructions as i32);
+        println!("Constants folded: {}", stats.constants_folded);
+        println!("Dead instructions removed: {}", stats.dead_instructions_removed);
+        println!("Tail calls optimized: {}", stats.tail_calls_optimized);
+        println!("Memory operations optimized: {}", stats.memory_operations_optimized);
+        println!("Peephole optimizations: {}", stats.peephole_optimizations_applied);
+        println!("Constants propagated: {}", stats.constants_propagated);
+        println!("Instructions combined: {}", stats.instructions_combined);
+        println!("Jumps threaded: {}", stats.jumps_threaded);
+        println!();
+    }
+
     let mut vm = VM::new_with_debug(program, debug_mode);
     if let Err(e) = vm.run() {
         eprintln!("VM runtime error: {}", e);

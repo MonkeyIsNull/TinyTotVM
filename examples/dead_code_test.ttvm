@@ -1,0 +1,64 @@
+; Dead Code Elimination Test
+; This program contains unreachable code that should be eliminated
+
+PUSH_STR "=== Dead Code Elimination Test ==="
+PRINT
+
+PUSH_STR "This code is reachable"
+PRINT
+
+; Jump over dead code
+JMP after_dead_code
+
+; This entire block is unreachable
+PUSH_STR "This is dead code 1"
+PRINT
+PUSH_INT 999
+STORE unused_var
+LOAD unused_var
+PRINT
+
+PUSH_STR "This is dead code 2"
+PRINT
+
+; More dead code after a jump
+JMP more_dead_code
+PUSH_STR "More dead code"
+PRINT
+
+LABEL more_dead_code
+PUSH_STR "This is also dead"
+PRINT
+
+LABEL after_dead_code
+PUSH_STR "Back to live code"
+PRINT
+
+; Conditional that always jumps
+TRUE
+JZ never_taken
+
+PUSH_STR "This is reachable"
+PRINT
+
+JMP end_program
+
+LABEL never_taken
+PUSH_STR "This branch is never taken"
+PRINT
+PUSH_INT 777
+PRINT
+
+LABEL end_program
+PUSH_STR "Program ending"
+PRINT
+
+HALT
+
+; Everything after HALT is dead
+PUSH_STR "Dead code after HALT"
+PRINT
+PUSH_INT 123
+PUSH_INT 456
+ADD
+PRINT

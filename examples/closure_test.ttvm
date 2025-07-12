@@ -1,0 +1,64 @@
+; Test basic closure functionality
+
+; Jump over function definitions
+JMP main
+
+; Lambda function that adds captured value
+LABEL add_lambda
+LOAD x         ; parameter 
+LOAD captured  ; captured variable
+ADD
+RET
+
+; Lambda that multiplies with captured value
+LABEL mult_lambda
+LOAD x
+LOAD factor
+MUL_F
+RET
+
+LABEL main
+
+; Test 1: Basic closure with captured variable
+PUSH_STR "Test 1: Basic closure"
+PRINT
+
+PUSH_INT 5
+STORE captured
+CAPTURE captured
+MAKE_LAMBDA add_lambda x
+STORE add_closure
+
+PUSH_INT 3
+LOAD add_closure
+CALL_FUNCTION
+PRINT  ; Should print 8 (3 + 5)
+
+; Test 2: Multiple captures
+PUSH_STR "Test 2: Multiple captures"
+PRINT
+
+PUSH_FLOAT 2.5
+STORE factor
+CAPTURE factor
+MAKE_LAMBDA mult_lambda x
+STORE mult_closure
+
+PUSH_FLOAT 4.0
+LOAD mult_closure
+CALL_FUNCTION
+PRINT  ; Should print 10.0 (4.0 * 2.5)
+
+; Test 3: Captured value changes don't affect closure
+PUSH_STR "Test 3: Closure isolation"
+PRINT
+
+PUSH_INT 99
+STORE captured  ; Change the original variable
+
+PUSH_INT 7
+LOAD add_closure  ; Use the same closure
+CALL_FUNCTION
+PRINT  ; Should still print 12 (7 + 5), not 106
+
+HALT

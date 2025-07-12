@@ -1,0 +1,78 @@
+; Test nested closures and higher-order functions
+
+JMP main
+
+; Outer function that returns a closure
+LABEL make_adder
+LOAD base    ; Get the base value parameter
+STORE captured_base
+CAPTURE captured_base
+MAKE_LAMBDA inner_add x
+RET
+
+; Inner lambda that adds to captured base
+LABEL inner_add
+LOAD x
+LOAD captured_base
+ADD
+RET
+
+; Function that applies a function twice
+LABEL apply_twice
+LOAD value      ; Get the value
+LOAD func       ; Get the function
+CALL_FUNCTION  ; First application: func(value) -> result1
+LOAD func       ; Get function again
+CALL_FUNCTION  ; Second application: func(result1) -> result2
+RET
+
+LABEL main
+
+; Test 1: Creating closure-returning function
+PUSH_STR "Test 1: Closure factory"
+PRINT
+
+; Create an "add 10" function
+PUSH_INT 10
+MAKE_FUNCTION make_adder base
+CALL_FUNCTION
+STORE add10
+
+; Use the returned closure
+PUSH_INT 5
+LOAD add10
+CALL_FUNCTION
+PRINT  ; Should print 15
+
+; Test 2: Create different closure from same factory
+PUSH_STR "Test 2: Multiple closures from factory"
+PRINT
+
+; Create an "add 20" function
+PUSH_INT 20
+MAKE_FUNCTION make_adder base
+CALL_FUNCTION
+STORE add20
+
+; Use both closures
+PUSH_INT 5
+LOAD add20
+CALL_FUNCTION
+PRINT  ; Should print 25
+
+PUSH_INT 3
+LOAD add10
+CALL_FUNCTION
+PRINT  ; Should print 13
+
+; Test 3: Higher-order function with closure
+PUSH_STR "Test 3: Higher-order with closure"
+PRINT
+
+PUSH_INT 1
+LOAD add10
+MAKE_FUNCTION apply_twice value func
+CALL_FUNCTION
+PRINT  ; Should print 21 (1 + 10 + 10)
+
+HALT

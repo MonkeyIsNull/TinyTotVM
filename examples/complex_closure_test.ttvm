@@ -1,0 +1,38 @@
+; Test complex nested closures across modules
+
+IMPORT examples/complex_closure_module.ttvm
+
+; Test nested closures
+PUSH_STR "Testing nested closures across modules:"
+PRINT
+
+; Create a nested adder with base=100
+PUSH_INT 100
+LOAD nested_factory
+CALL_FUNCTION
+STORE inner_factory_100
+
+; Create an adder that adds step=10 to base=100
+PUSH_INT 10  
+LOAD inner_factory_100
+CALL_FUNCTION
+STORE add_110  ; This should add 10 + 100 = 110 to input
+
+; Test the nested closure
+PUSH_INT 5
+LOAD add_110
+CALL_FUNCTION
+PRINT  ; Should print 115 (5 + 10 + 100)
+
+; Create another with different step
+PUSH_INT 20
+LOAD inner_factory_100
+CALL_FUNCTION
+STORE add_120  ; This should add 20 + 100 = 120 to input
+
+PUSH_INT 5
+LOAD add_120
+CALL_FUNCTION
+PRINT  ; Should print 125 (5 + 20 + 100)
+
+HALT

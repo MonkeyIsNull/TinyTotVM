@@ -1,0 +1,58 @@
+; Test TinyTotVM Standard Library - String Module
+
+IMPORT std/string.ttvm
+
+PUSH_STR "=== String Library Tests ==="
+PRINT
+
+; Test string length
+PUSH_STR "Testing strlen:"
+PRINT
+PUSH_STR "hello"
+LOAD strlen
+CALL_FUNCTION
+PRINT
+
+; Test string concatenation
+PUSH_STR "Testing strcat:"
+PRINT
+PUSH_STR "Hello, "
+PUSH_STR "World!"
+LOAD strcat
+CALL_FUNCTION
+PRINT
+
+; Test string repeat
+PUSH_STR "Testing repeat:"
+PRINT
+PUSH_STR "Hi"
+PUSH_INT 3
+LOAD repeat
+CALL_FUNCTION
+PRINT
+
+; Test upper case
+PUSH_STR "Testing upper:"
+PRINT
+PUSH_STR "hello world"
+LOAD upper
+CALL_FUNCTION
+PRINT
+
+; Test lower case
+PUSH_STR "Testing lower:"
+PRINT
+PUSH_STR "HELLO WORLD"
+LOAD lower
+CALL_FUNCTION
+PRINT
+
+; Test trim
+PUSH_STR "Testing trim:"
+PRINT
+PUSH_STR "  spaced  "
+LOAD trim
+CALL_FUNCTION
+PRINT
+
+HALT

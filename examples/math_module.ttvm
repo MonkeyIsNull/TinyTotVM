@@ -1,0 +1,48 @@
+; Math module - provides mathematical functions
+
+; Jump over function definitions to main module code
+JMP main_module
+
+; Define add function
+LABEL add_func
+LOAD x
+LOAD y
+ADD
+RET
+
+; Define multiply function
+LABEL mult_func
+LOAD x
+LOAD y
+MUL_F
+RET
+
+; Define square function
+LABEL square_func
+LOAD x
+DUP
+MUL_F
+RET
+
+; Main module initialization
+LABEL main_module
+
+; Create function pointers
+MAKE_FUNCTION add_func x y
+STORE add
+EXPORT add
+
+MAKE_FUNCTION mult_func x y
+STORE multiply
+EXPORT multiply
+
+MAKE_FUNCTION square_func x
+STORE square
+EXPORT square
+
+; Export a constant
+PUSH_FLOAT 3.14159
+STORE PI
+EXPORT PI
+
+HALT

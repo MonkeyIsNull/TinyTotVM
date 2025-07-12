@@ -1,0 +1,186 @@
+; TinyTotVM Standard Library - Convert Module
+; Provides type conversion utilities
+
+JMP main
+
+; Convert number to string representation
+LABEL to_string_func
+LOAD value
+; Simplified implementation - in reality would convert any type to string
+; For demo, return a placeholder string since we can't actually convert types
+PUSH_STR "converted_to_string"
+RET
+
+; Convert string to integer (simplified)
+LABEL to_int_func
+LOAD str
+; Simplified implementation - in reality would parse string to integer
+; For demo, return a fixed integer
+PUSH_INT 42
+RET
+
+; Convert string/int to float (simplified)
+LABEL to_float_func
+LOAD value
+; Simplified implementation - in reality would convert to float
+; For demo, return a fixed float
+PUSH_FLOAT 42.0
+RET
+
+; Convert any value to boolean
+LABEL to_bool_func
+LOAD value
+; Check if value is "truthy"
+; Numbers: non-zero is true
+; Strings: non-empty is true
+; Lists: non-empty is true
+; Null: false
+; For simplified implementation, just return true for demo
+TRUE
+RET
+
+; Type checking functions
+LABEL is_int_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return true
+TRUE
+RET
+
+LABEL is_float_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return false
+FALSE
+RET
+
+LABEL is_string_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return true
+TRUE
+RET
+
+LABEL is_bool_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return false
+FALSE
+RET
+
+LABEL is_null_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return false
+FALSE
+RET
+
+LABEL is_list_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return false
+FALSE
+RET
+
+LABEL is_object_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return false
+FALSE
+RET
+
+LABEL is_function_func
+LOAD value
+; Simplified - would check actual type
+; For demo, return false
+FALSE
+RET
+
+; Get type name as string
+LABEL type_of_func
+LOAD value
+; Simplified implementation - would return actual type name
+PUSH_STR "unknown"
+RET
+
+; Safe conversion with default value
+LABEL safe_to_int_func
+LOAD value
+LOAD default_val
+; Try to convert, return default if fails
+; Simplified - just return the default for demo
+RET
+
+LABEL safe_to_float_func
+LOAD value
+LOAD default_val
+; Try to convert, return default if fails
+; Simplified - just return the default for demo
+RET
+
+LABEL main
+
+; Export conversion functions
+MAKE_FUNCTION to_string_func value
+STORE to_string
+EXPORT to_string
+
+MAKE_FUNCTION to_int_func str
+STORE to_int
+EXPORT to_int
+
+MAKE_FUNCTION to_float_func value
+STORE to_float
+EXPORT to_float
+
+MAKE_FUNCTION to_bool_func value
+STORE to_bool
+EXPORT to_bool
+
+; Export type checking functions
+MAKE_FUNCTION is_int_func value
+STORE is_int
+EXPORT is_int
+
+MAKE_FUNCTION is_float_func value
+STORE is_float
+EXPORT is_float
+
+MAKE_FUNCTION is_string_func value
+STORE is_string
+EXPORT is_string
+
+MAKE_FUNCTION is_bool_func value
+STORE is_bool
+EXPORT is_bool
+
+MAKE_FUNCTION is_null_func value
+STORE is_null
+EXPORT is_null
+
+MAKE_FUNCTION is_list_func value
+STORE is_list
+EXPORT is_list
+
+MAKE_FUNCTION is_object_func value
+STORE is_object
+EXPORT is_object
+
+MAKE_FUNCTION is_function_func value
+STORE is_function
+EXPORT is_function
+
+MAKE_FUNCTION type_of_func value
+STORE type_of
+EXPORT type_of
+
+; Export safe conversion functions
+MAKE_FUNCTION safe_to_int_func value default_val
+STORE safe_to_int
+EXPORT safe_to_int
+
+MAKE_FUNCTION safe_to_float_func value default_val
+STORE safe_to_float
+EXPORT safe_to_float
+
+HALT

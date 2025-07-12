@@ -1,0 +1,63 @@
+; Simple closure test without modules
+
+JMP main
+
+; Simple lambda that adds 10
+LABEL add_ten_lambda
+LOAD x
+LOAD ten
+ADD
+RET
+
+; Lambda that concatenates with prefix
+LABEL prefix_lambda
+LOAD prefix
+LOAD text
+CONCAT
+RET
+
+LABEL main
+
+; Test 1: Basic closure with capture
+PUSH_STR "Test 1: Basic closure"
+PRINT
+
+PUSH_INT 10
+STORE ten
+CAPTURE ten
+MAKE_LAMBDA add_ten_lambda x
+STORE add_ten
+
+PUSH_INT 5
+LOAD add_ten
+CALL_FUNCTION
+PRINT  ; Should print 15
+
+; Test 2: String capture
+PUSH_STR "Test 2: String capture"
+PRINT
+
+PUSH_STR "Hello, "
+STORE prefix
+CAPTURE prefix
+MAKE_LAMBDA prefix_lambda text
+STORE greeter
+
+PUSH_STR "World!"
+LOAD greeter
+CALL_FUNCTION
+PRINT  ; Should print "Hello, World!"
+
+; Test 3: Capture isolation
+PUSH_STR "Test 3: Capture isolation"
+PRINT
+
+PUSH_INT 999
+STORE ten  ; Change the original variable
+
+PUSH_INT 7
+LOAD add_ten  ; Use the closure again
+CALL_FUNCTION
+PRINT  ; Should still print 17 (7 + 10), not 1006
+
+HALT

@@ -1,0 +1,67 @@
+; Test TinyTotVM Standard Library
+
+; Test math library
+IMPORT std/math.ttvm
+
+PUSH_STR "=== Math Library Tests ==="
+PRINT
+
+; Test constants
+PUSH_STR "Math constants:"
+PRINT
+LOAD PI
+PRINT
+LOAD E
+PRINT
+
+; Test absolute value
+PUSH_STR "Testing abs(-5.5):"
+PRINT
+PUSH_FLOAT -5.5
+LOAD abs
+CALL_FUNCTION
+PRINT
+
+; Test power function
+PUSH_STR "Testing pow(2.0, 3):"
+PRINT
+PUSH_FLOAT 2.0
+PUSH_INT 3
+LOAD pow
+CALL_FUNCTION
+PRINT
+
+; Test square root
+PUSH_STR "Testing sqrt(16.0):"
+PRINT
+PUSH_FLOAT 16.0
+LOAD sqrt
+CALL_FUNCTION
+PRINT
+
+; Test max/min
+PUSH_STR "Testing max(10.0, 20.0):"
+PRINT
+PUSH_FLOAT 10.0
+PUSH_FLOAT 20.0
+LOAD max
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "Testing min(10.0, 20.0):"
+PRINT
+PUSH_FLOAT 10.0
+PUSH_FLOAT 20.0
+LOAD min
+CALL_FUNCTION
+PRINT
+
+; Test factorial
+PUSH_STR "Testing factorial(5):"
+PRINT
+PUSH_INT 5
+LOAD factorial
+CALL_FUNCTION
+PRINT
+
+HALT

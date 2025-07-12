@@ -1,0 +1,71 @@
+; Constant Folding Test Examples
+; These expressions should be computed at compile time
+
+PUSH_STR "=== Constant Folding Test ==="
+PRINT
+
+; Integer arithmetic
+PUSH_STR "Integer arithmetic:"
+PRINT
+
+PUSH_INT 15
+PUSH_INT 10
+ADD
+PRINT
+
+PUSH_INT 20
+PUSH_INT 8
+SUB
+PRINT
+
+; Float arithmetic
+PUSH_STR "Float arithmetic:"
+PRINT
+
+PUSH_FLOAT 7.5
+PUSH_FLOAT 2.5
+ADD_F
+PRINT
+
+PUSH_FLOAT 15.0
+PUSH_FLOAT 3.0
+MUL_F
+PRINT
+
+PUSH_FLOAT 20.0
+PUSH_FLOAT 4.0
+DIV_F
+PRINT
+
+; Comparisons
+PUSH_STR "Comparisons:"
+PRINT
+
+PUSH_INT 10
+PUSH_INT 5
+GT
+PRINT
+
+PUSH_INT 3
+PUSH_INT 8
+LT
+PRINT
+
+PUSH_INT 7
+PUSH_INT 7
+EQ
+PRINT
+
+; Boolean operations
+PUSH_STR "Boolean operations:"
+PRINT
+
+TRUE
+NOT
+PRINT
+
+FALSE
+NOT
+PRINT
+
+HALT

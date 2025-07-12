@@ -1,0 +1,76 @@
+; TinyTotVM Optimization Test
+; This program demonstrates various optimization opportunities
+
+; Constant folding examples
+PUSH_INT 5
+PUSH_INT 3
+ADD
+PRINT
+
+PUSH_FLOAT 10.0
+PUSH_FLOAT 2.0
+MUL_F
+PRINT
+
+PUSH_INT 15
+PUSH_INT 7
+LT
+PRINT
+
+; Dead code example
+JMP skip_dead_code
+PUSH_STR "This is dead code"
+PRINT
+PUSH_INT 999
+HALT
+
+LABEL skip_dead_code
+PUSH_STR "Skipped dead code"
+PRINT
+
+; Memory optimization examples
+PUSH_INT 42
+STORE temp
+LOAD temp
+PRINT
+
+LOAD temp
+LOAD temp
+ADD
+PRINT
+
+; Tail call optimization example
+CALL factorial_func x
+RET
+
+LABEL factorial_func
+LOAD x
+PUSH_INT 1
+LE
+JZ factorial_recursive
+PUSH_INT 1
+RET
+
+LABEL factorial_recursive
+LOAD x
+PUSH_INT 1
+SUB
+STORE x
+CALL factorial_func x
+RET
+
+; More constant folding
+TRUE
+NOT
+PRINT
+
+FALSE
+NOT
+PRINT
+
+PUSH_INT 100
+PUSH_INT 50
+GT
+PRINT
+
+HALT
