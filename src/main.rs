@@ -4,6 +4,7 @@ use std::fmt;
 mod bytecode;
 mod compiler;
 mod lisp_compiler;
+mod optimizer;
 
 #[derive(Debug, Clone)]
 pub enum VMError {
@@ -1433,71 +1434,232 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
     Ok(program)
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: tinytotvm [--debug] <program.ttvm|program.ttb>");
-        eprintln!("       tinytotvm compile <input.ttvm> <output.ttb>");
-        eprintln!("       tinytotvm compile-lisp <input.lisp> <output.ttvm>");
-        std::process::exit(1);
-    }
-
-    let mut debug_mode = false;
-    let mut file_index = 1;
-
-    // Check for debug flag
-    if args.len() > 2 && args[1] == "--debug" {
-        debug_mode = true;
-        file_index = 2;
-    }
-
-    if args.len() >= 2 && args[1] == "compile" {
-        if args.len() != 4 {
-            eprintln!("Usage: tinytotvm compile <input.ttvm> <output.ttb>");
-            std::process::exit(1);
-        }
-        let input = &args[2];
-        let output = &args[3];
-        compiler::compile(input, output).expect("Compilation failed");
-        println!("Compiled to {}", output);
-        return;
-    }
-
-    if args[file_index].ends_with(".ttb") {
-        let program = bytecode::load_bytecode(&args[file_index]).expect("Failed to load bytecode");
-        let mut vm = VM::new_with_debug(program, debug_mode);
-        if let Err(e) = vm.run() {
-            eprintln!("VM runtime error: {}", e);
-            std::process::exit(1);
-        }
-        if debug_mode {
-            let (instructions, max_stack, final_stack) = vm.get_stats();
-            println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
-                instructions, max_stack, final_stack);
-        }
-        return;
-    }
-
-    if args[1] == "compile-lisp" {
-        if args.len() != 4 {
-            eprintln!("Usage: tinytotvm compile-lisp <input.lisp> <output.ttvm>");
-            std::process::exit(1);
-        }
-        let input = &args[2];
-        let output = &args[3];
-        lisp_compiler::compile_lisp(input, output);
-        println!("Compiled Lisp to {}", output);
-        return;
-    }
-
-    let program = match parse_program(&args[file_index]) {
+fn optimize_program(input_file: &str, output_file: &str) {
+    let program = match parse_program(input_file) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Parse error: {}", e);
             std::process::exit(1);
         }
     };
+
+    let mut optimizer = optimizer::Optimizer::new(optimizer::OptimizationOptions::default());
+    let analysis_before = optimizer.analyze_program(&program);
+    
+    println!("=== Program Analysis (Before Optimization) ===");
+    println!("Total instructions: {}", analysis_before.total_instructions);
+    println!("Constants: {}", analysis_before.constant_count);
+    println!("Function calls: {}", analysis_before.call_count);
+    println!("Memory operations: {}", analysis_before.memory_op_count);
+    println!("Jumps: {}", analysis_before.jump_count);
+    println!();
+
+    let (optimized_program, stats) = optimizer.optimize(program);
+    let analysis_after = optimizer.analyze_program(&optimized_program);
+
+    println!("=== Optimization Results ===");
+    println!("Instructions: {} -> {} ({})", 
+        analysis_before.total_instructions, 
+        analysis_after.total_instructions,
+        analysis_before.total_instructions as i32 - analysis_after.total_instructions as i32);
+    println!("Constants folded: {}", stats.constants_folded);
+    println!("Dead instructions removed: {}", stats.dead_instructions_removed);
+    println!("Tail calls optimized: {}", stats.tail_calls_optimized);
+    println!("Memory operations optimized: {}", stats.memory_operations_optimized);
+    println!();
+
+    // Write optimized program to file
+    match write_optimized_program(&optimized_program, output_file) {
+        Ok(_) => println!("Optimized program written to {}", output_file),
+        Err(e) => {
+            eprintln!("Failed to write optimized program: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Result<()> {
+    let mut output = String::new();
+    
+    for (_i, instruction) in program.iter().enumerate() {
+        let line = match instruction {
+            OpCode::PushInt(n) => format!("PUSH_INT {}", n),
+            OpCode::PushFloat(f) => format!("PUSH_FLOAT {}", f),
+            OpCode::PushStr(s) => format!("PUSH_STR \"{}\"", s.replace("\"", "\\\"")),
+            OpCode::Add => "ADD".to_string(),
+            OpCode::AddF => "ADD_F".to_string(),
+            OpCode::Sub => "SUB".to_string(),
+            OpCode::SubF => "SUB_F".to_string(),
+            OpCode::MulF => "MUL_F".to_string(),
+            OpCode::DivF => "DIV_F".to_string(),
+            OpCode::Concat => "CONCAT".to_string(),
+            OpCode::Print => "PRINT".to_string(),
+            OpCode::Halt => "HALT".to_string(),
+            OpCode::Jmp(addr) => format!("JMP {}", addr),
+            OpCode::Jz(addr) => format!("JZ {}", addr),
+            OpCode::Call { addr, params } => format!("CALL {} {}", addr, params.join(" ")),
+            OpCode::Ret => "RET".to_string(),
+            OpCode::Dup => "DUP".to_string(),
+            OpCode::Store(var) => format!("STORE {}", var),
+            OpCode::Load(var) => format!("LOAD {}", var),
+            OpCode::Delete(var) => format!("DELETE {}", var),
+            OpCode::Eq => "EQ".to_string(),
+            OpCode::Ne => "NE".to_string(),
+            OpCode::Gt => "GT".to_string(),
+            OpCode::Lt => "LT".to_string(),
+            OpCode::Ge => "GE".to_string(),
+            OpCode::Le => "LE".to_string(),
+            OpCode::EqF => "EQ_F".to_string(),
+            OpCode::NeF => "NE_F".to_string(),
+            OpCode::GtF => "GT_F".to_string(),
+            OpCode::LtF => "LT_F".to_string(),
+            OpCode::GeF => "GE_F".to_string(),
+            OpCode::LeF => "LE_F".to_string(),
+            OpCode::True => "TRUE".to_string(),
+            OpCode::False => "FALSE".to_string(),
+            OpCode::Not => "NOT".to_string(),
+            OpCode::And => "AND".to_string(),
+            OpCode::Or => "OR".to_string(),
+            OpCode::Null => "NULL".to_string(),
+            OpCode::MakeList(n) => format!("MAKE_LIST {}", n),
+            OpCode::Len => "LEN".to_string(),
+            OpCode::Index => "INDEX".to_string(),
+            OpCode::DumpScope => "DUMP_SCOPE".to_string(),
+            OpCode::ReadFile => "READ_FILE".to_string(),
+            OpCode::WriteFile => "WRITE_FILE".to_string(),
+            OpCode::MakeObject => "MAKE_OBJECT".to_string(),
+            OpCode::SetField(field) => format!("SET_FIELD {}", field),
+            OpCode::GetField(field) => format!("GET_FIELD {}", field),
+            OpCode::HasField(field) => format!("HAS_FIELD {}", field),
+            OpCode::DeleteField(field) => format!("DELETE_FIELD {}", field),
+            OpCode::Keys => "KEYS".to_string(),
+            OpCode::MakeFunction { addr, params } => format!("MAKE_FUNCTION {} {}", addr, params.join(" ")),
+            OpCode::CallFunction => "CALL_FUNCTION".to_string(),
+            OpCode::MakeLambda { addr, params } => format!("MAKE_LAMBDA {} {}", addr, params.join(" ")),
+            OpCode::Capture(var) => format!("CAPTURE {}", var),
+            OpCode::Try { catch_addr } => format!("TRY {}", catch_addr),
+            OpCode::Catch => "CATCH".to_string(),
+            OpCode::Throw => "THROW".to_string(),
+            OpCode::EndTry => "END_TRY".to_string(),
+            OpCode::Import(path) => format!("IMPORT {}", path),
+            OpCode::Export(name) => format!("EXPORT {}", name),
+        };
+        output.push_str(&line);
+        output.push('\n');
+    }
+    
+    std::fs::write(output_file, output)
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: tinytotvm [--debug] [--optimize] <program.ttvm|program.ttb>");
+        eprintln!("       tinytotvm compile <input.ttvm> <output.ttb>");
+        eprintln!("       tinytotvm compile-lisp <input.lisp> <output.ttvm>");
+        eprintln!("       tinytotvm optimize <input.ttvm> <output.ttvm>");
+        std::process::exit(1);
+    }
+
+    let mut debug_mode = false;
+    let mut optimize_mode = false;
+    let mut file_index = 1;
+
+    // Check for flags
+    while file_index < args.len() && args[file_index].starts_with("--") {
+        match args[file_index].as_str() {
+            "--debug" => {
+                debug_mode = true;
+                file_index += 1;
+            }
+            "--optimize" => {
+                optimize_mode = true;
+                file_index += 1;
+            }
+            _ => {
+                eprintln!("Unknown flag: {}", args[file_index]);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Handle special commands
+    if file_index < args.len() {
+        match args[file_index].as_str() {
+            "compile" => {
+                if args.len() != file_index + 3 {
+                    eprintln!("Usage: tinytotvm compile <input.ttvm> <output.ttb>");
+                    std::process::exit(1);
+                }
+                let input = &args[file_index + 1];
+                let output = &args[file_index + 2];
+                compiler::compile(input, output).expect("Compilation failed");
+                println!("Compiled to {}", output);
+                return;
+            }
+            "optimize" => {
+                if args.len() != file_index + 3 {
+                    eprintln!("Usage: tinytotvm optimize <input.ttvm> <output.ttvm>");
+                    std::process::exit(1);
+                }
+                let input = &args[file_index + 1];
+                let output = &args[file_index + 2];
+                optimize_program(input, output);
+                return;
+            }
+            "compile-lisp" => {
+                if args.len() != file_index + 3 {
+                    eprintln!("Usage: tinytotvm compile-lisp <input.lisp> <output.ttvm>");
+                    std::process::exit(1);
+                }
+                let input = &args[file_index + 1];
+                let output = &args[file_index + 2];
+                lisp_compiler::compile_lisp(input, output);
+                println!("Compiled Lisp to {}", output);
+                return;
+            }
+            _ => {
+                // Normal execution, continue below
+            }
+        }
+    }
+
+    // Normal execution
+    let mut program = if args[file_index].ends_with(".ttb") {
+        bytecode::load_bytecode(&args[file_index]).expect("Failed to load bytecode")
+    } else {
+        match parse_program(&args[file_index]) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Parse error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    // Apply optimizations if requested
+    if optimize_mode {
+        let mut optimizer = optimizer::Optimizer::new(optimizer::OptimizationOptions::default());
+        let analysis_before = optimizer.analyze_program(&program);
+        
+        let (optimized_program, stats) = optimizer.optimize(program);
+        program = optimized_program;
+        
+        let analysis_after = optimizer.analyze_program(&program);
+        
+        println!("=== Optimization Results ===");
+        println!("Instructions: {} -> {} ({})", 
+            analysis_before.total_instructions, 
+            analysis_after.total_instructions,
+            analysis_before.total_instructions as i32 - analysis_after.total_instructions as i32);
+        println!("Constants folded: {}", stats.constants_folded);
+        println!("Dead instructions removed: {}", stats.dead_instructions_removed);
+        println!("Tail calls optimized: {}", stats.tail_calls_optimized);
+        println!("Memory operations optimized: {}", stats.memory_operations_optimized);
+        println!();
+    }
+
     let mut vm = VM::new_with_debug(program, debug_mode);
     if let Err(e) = vm.run() {
         eprintln!("VM runtime error: {}", e);

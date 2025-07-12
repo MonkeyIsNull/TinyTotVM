@@ -1,0 +1,78 @@
+; Comprehensive Optimization Test
+; Combines all optimization opportunities
+
+PUSH_STR "=== Comprehensive Optimization Test ==="
+PRINT
+
+; Mix of constant folding and memory optimization
+PUSH_INT 5
+PUSH_INT 3
+ADD           ; Should fold to PUSH_INT 8
+STORE result
+LOAD result   ; Should optimize to DUP
+PRINT
+
+; Dead code with constant folding
+TRUE
+JZ skip_section  ; This jump will never be taken
+
+PUSH_FLOAT 10.0
+PUSH_FLOAT 5.0
+MUL_F         ; Should fold to PUSH_FLOAT 50.0 (but this is unreachable)
+PRINT
+
+LABEL skip_section
+
+; Tail recursion example
+PUSH_INT 5
+STORE counter
+CALL recursive_function counter
+
+HALT
+
+LABEL recursive_function
+LOAD counter
+PRINT
+LOAD counter
+PUSH_INT 1
+SUB           ; Could fold if counter was constant
+STORE counter
+LOAD counter
+PUSH_INT 0
+GT
+JZ end_recursion
+
+CALL recursive_function counter  ; Tail call - optimize to JMP
+RET
+
+LABEL end_recursion
+PUSH_STR "Recursion complete"
+PRINT
+RET
+
+; More dead code after function
+PUSH_STR "This code is never reached"
+PRINT
+PUSH_INT 1
+PUSH_INT 1
+ADD
+PRINT
+
+; Complex constant folding
+PUSH_FLOAT 2.0
+PUSH_FLOAT 3.0
+MUL_F         ; Should fold to 6.0
+PUSH_FLOAT 4.0
+ADD_F         ; Should fold to 10.0  
+PRINT
+
+; Memory optimization with constants
+PUSH_INT 100
+STORE big_number
+LOAD big_number
+LOAD big_number   ; Should optimize to DUP
+PUSH_INT 50       
+PUSH_INT 25
+ADD               ; Should fold to 75
+GT                ; Should evaluate at compile time
+PRINT

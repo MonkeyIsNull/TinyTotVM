@@ -424,6 +424,12 @@ cargo run examples/program.ttvm
 # Debug mode with step-by-step tracing
 cargo run -- --debug examples/program.ttvm
 
+# Run with optimizations enabled
+cargo run -- --optimize examples/program.ttvm
+
+# Optimize and save program
+cargo run -- optimize input.ttvm optimized.ttvm
+
 # Compile to bytecode and run
 cargo run -- compile examples/program.ttvm program.ttb
 cargo run program.ttb
@@ -450,6 +456,7 @@ TinyTotVM is designed for efficiency and production use:
 - **Efficient Function Calls** - Optimized call stack and parameter passing
 - **Smart Address Resolution** - Automatic function pointer adjustment in modules
 - **Closure Optimization** - Efficient captured environment management
+- **Advanced Optimization Engine** - Dead code elimination, constant folding, tail call optimization
 
 ## Example Programs
 
@@ -478,6 +485,12 @@ The `examples/` directory contains comprehensive test programs:
 - **`stdlib_string_test.ttvm`** - String utilities demonstration
 - **`stdlib_prelude_test.ttvm`** - Prelude module demonstration  
 - **`stdlib_comprehensive_test.ttvm`** - Complete standard library showcase
+- **`optimization_test.ttvm`** - General optimization capabilities demonstration
+- **`constant_folding_test.ttvm`** - Constant folding optimization examples
+- **`dead_code_test.ttvm`** - Dead code elimination demonstration
+- **`tail_call_test.ttvm`** - Tail call optimization examples
+- **`memory_optimization_test.ttvm`** - Memory access pattern optimization
+- **`comprehensive_optimization_test.ttvm`** - Combined optimization techniques
 
 ## Architecture
 
@@ -487,7 +500,9 @@ TinyTotVM uses a clean, modular architecture:
 - **`compiler.rs`** - Assembly to bytecode compilation
 - **`bytecode.rs`** - Binary format loading and processing
 - **`lisp_compiler.rs`** - Lisp to assembly transpilation
+- **`optimizer.rs`** - Advanced optimization engine with multiple optimization passes
 - **`std/`** - Standard library modules for enhanced functionality
+- **`docs/`** - Comprehensive documentation including optimization guide
 
 ### **Value System**
 ```rust

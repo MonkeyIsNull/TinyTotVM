@@ -1,0 +1,68 @@
+; Tail Call Optimization Test
+; Functions that end with tail calls should be optimized to jumps
+
+PUSH_STR "=== Tail Call Optimization Test ==="
+PRINT
+
+; Simple tail call
+PUSH_INT 5
+STORE n
+CALL countdown n
+PRINT
+
+HALT
+
+; Countdown function with tail call
+LABEL countdown
+LOAD n
+PRINT
+LOAD n
+PUSH_INT 0
+LE
+JZ countdown_continue
+
+PUSH_STR "Done!"
+RET
+
+LABEL countdown_continue
+LOAD n
+PUSH_INT 1
+SUB
+STORE n
+CALL countdown n  ; This should be optimized to JMP
+RET
+
+; Another function with tail call
+LABEL sum_to_n
+LOAD n
+PUSH_INT 0
+LE
+JZ sum_continue
+
+PUSH_INT 0
+RET
+
+LABEL sum_continue
+LOAD n
+LOAD acc
+ADD
+STORE acc
+LOAD n
+PUSH_INT 1
+SUB
+STORE n
+CALL sum_to_n n  ; Tail call
+RET
+
+; Non-tail call example (should not be optimized)
+LABEL non_tail_example
+PUSH_INT 42
+STORE temp
+CALL helper_func temp
+PUSH_INT 1
+ADD  ; This prevents tail call optimization
+RET
+
+LABEL helper_func
+LOAD temp
+RET

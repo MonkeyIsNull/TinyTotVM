@@ -1,0 +1,53 @@
+; Memory Layout Optimization Test
+; Tests for redundant memory operations
+
+PUSH_STR "=== Memory Optimization Test ==="
+PRINT
+
+; Store followed by load - can be optimized to store + dup
+PUSH_INT 42
+STORE value
+LOAD value
+PRINT
+
+; Duplicate load operations
+PUSH_INT 100
+STORE number
+LOAD number
+LOAD number  ; This should be optimized to DUP
+ADD
+PRINT
+
+; Multiple loads of same variable
+PUSH_STR "Hello"
+STORE greeting
+LOAD greeting
+PRINT
+LOAD greeting  ; Another load of same variable
+LOAD greeting  ; Yet another load
+CONCAT
+PRINT
+
+; Store/load chains
+PUSH_INT 10
+STORE a
+LOAD a
+STORE b
+LOAD b
+STORE c
+LOAD c
+PRINT
+
+; Mixed operations that can't be optimized
+PUSH_INT 5
+STORE x
+PUSH_INT 3
+STORE y
+LOAD x
+LOAD y
+ADD
+STORE result
+LOAD result
+PRINT
+
+HALT
