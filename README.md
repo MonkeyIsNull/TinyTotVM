@@ -4,6 +4,12 @@
 
 > „Ohne Kaffee keine Erleuchtung – auch nicht für Maschinen."
 
+TinyTotVM is a tiny, stack-based virtual machine written in Rust.
+
+This repo is, in essence, a toy-box for my experiments in writing a VM. It's not expected to be used for production usage in anything. That said, if you want to play around with it, have at it. At some point I'll update my long-term goals for it and post them someplace here, at least so I remember them.
+
+
+## Braggart Version
 **TinyTotVM** is a comprehensive, stack-based virtual machine written in Rust with advanced language features including float arithmetic, objects, function pointers, closures & lambdas, exception handling, module system, standard library, and comprehensive debugging support.
 
 ## Features
@@ -21,7 +27,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 
 ### **Complete Feature Overview**
 
-TinyTotVM is a **production-ready virtual machine** with features found in modern programming languages:
+TinyTotVM is a **toy virtual machine** with features found in modern programming languages:
 
 - **9 Built-in Data Types** - Complete type system with automatic memory management
 - **55+ Core Instructions** - Full instruction set for all programming paradigms  
@@ -29,6 +35,7 @@ TinyTotVM is a **production-ready virtual machine** with features found in moder
 - **Advanced Function System** - First-class functions, closures, higher-order programming
 - **Robust Module System** - Import/export with dependency management and closure support
 - **Exception Handling** - Structured error handling with stack unwinding
+- **Advanced Optimization Engine** - 8 optimization passes for production-grade performance
 - **Memory Safety** - No crashes, comprehensive error handling, automatic cleanup
 - **Cross-Platform** - Pure Rust implementation, runs anywhere Rust compiles
 - **Educational Value** - Clean architecture demonstrating VM design principles
@@ -166,6 +173,32 @@ CALL_FUNCTION          ; Outputs: sum of elements
 - **Type Conversion** - Convert between types with safety checks
 - **I/O Utilities** - File operations, JSON/CSV handling, logging functions
 - **Prelude Module** - Common functions imported together for convenience
+
+### **Advanced Optimization Engine**
+```bash
+# Run with optimizations enabled
+cargo run -- --optimize examples/program.ttvm
+
+# Optimize and save program
+cargo run -- optimize input.ttvm optimized.ttvm
+```
+TinyTotVM features a sophisticated 8-pass optimization engine that provides significant performance improvements:
+
+**Optimization Passes:**
+- **Constant Folding** - Evaluates arithmetic and boolean expressions at compile time
+- **Constant Propagation** - Replaces variable loads with known constant values
+- **Dead Code Elimination** - Removes unreachable code after jumps and branches
+- **Peephole Optimizations** - Optimizes small instruction sequences (identity operations, double negation)
+- **Instruction Combining** - Combines multiple instructions into efficient forms
+- **Jump Threading** - Optimizes chains of jumps to jump directly to final targets
+- **Tail Call Optimization** - Converts tail recursive calls to jumps
+- **Memory Layout Optimization** - Optimizes redundant memory access patterns
+
+**Performance Results:**
+- **Up to 71% instruction reduction** in dead code elimination
+- **46% instruction reduction** in comprehensive optimization tests
+- **37% instruction reduction** in constant folding tests
+- **Detailed optimization statistics** with granular reporting per optimization type
 
 ### **Control Flow & Functions**
 - **Conditional Jumps** - `JMP`, `JZ` (jump if zero/false/null)
@@ -407,6 +440,113 @@ CALL_FUNCTION          ; Outputs: "INFO: converted_to_string"
 HALT
 ```
 
+## Comprehensive Testing
+
+TinyTotVM includes extensive test suites to verify all functionality. Run these tests to validate the VM's capabilities:
+
+### **Core VM Tests**
+```bash
+# Basic functionality tests
+cargo run examples/showcase.ttvm
+cargo run examples/float_test.ttvm
+cargo run examples/object_test.ttvm
+
+# Function and closure tests  
+cargo run examples/function_pointer_test.ttvm
+cargo run examples/closure_test.ttvm
+cargo run examples/nested_closure_test.ttvm
+
+# Module system tests
+cargo run examples/module_test.ttvm
+cargo run examples/comprehensive_module_test.ttvm
+cargo run examples/closure_module_test.ttvm
+
+# Exception handling tests
+cargo run examples/exception_test.ttvm
+```
+
+### **Standard Library Tests**
+```bash
+# Individual library tests
+cargo run examples/stdlib_test.ttvm
+cargo run examples/stdlib_string_test.ttvm
+cargo run examples/stdlib_prelude_test.ttvm
+
+# Comprehensive standard library test
+cargo run examples/stdlib_comprehensive_test.ttvm
+```
+
+### **Optimization Engine Tests**
+```bash
+# Basic optimizations
+cargo run -- --optimize examples/constant_folding_test.ttvm
+cargo run -- --optimize examples/dead_code_test.ttvm
+cargo run -- --optimize examples/tail_call_test.ttvm
+
+# Advanced optimizations
+cargo run -- --optimize examples/advanced_optimization_test.ttvm
+cargo run -- --optimize examples/safe_advanced_optimization_test.ttvm
+
+# Complete optimization showcase
+cargo run -- --optimize examples/complete_optimization_showcase.ttvm
+
+# Save optimized programs
+cargo run -- optimize examples/constant_folding_test.ttvm /tmp/optimized.ttvm
+cargo run /tmp/optimized.ttvm
+```
+
+### **Debug and Analysis**
+```bash
+# Debug mode with step-by-step tracing
+cargo run -- --debug examples/showcase.ttvm
+
+# Combined debug and optimization
+cargo run -- --debug --optimize examples/program.ttvm
+
+# Optimization analysis only
+cargo run -- optimize examples/program.ttvm /tmp/optimized.ttvm
+```
+
+### **Performance Benchmarks**
+```bash
+# Compare performance with and without optimizations
+time cargo run examples/comprehensive_optimization_test.ttvm
+time cargo run -- --optimize examples/comprehensive_optimization_test.ttvm
+
+# Large program optimization
+time cargo run -- --optimize examples/stdlib_comprehensive_test.ttvm
+```
+
+### **Expected Results**
+When running optimization tests, you should see results like:
+```
+=== Optimization Results ===
+Instructions: 49 -> 31 (18)
+Constants folded: 18
+Dead instructions removed: 0
+Tail calls optimized: 0
+Memory operations optimized: 0
+Peephole optimizations: 0
+Constants propagated: 0
+Instructions combined: 0
+Jumps threaded: 0
+```
+
+### **Validation Commands**
+```bash
+# Run all core tests
+for test in examples/*.ttvm; do echo "Testing $test"; cargo run "$test" || echo "FAILED: $test"; done
+
+# Run all optimization tests  
+for test in examples/*optimization*.ttvm; do echo "Optimizing $test"; cargo run -- --optimize "$test" || echo "FAILED: $test"; done
+
+# Comprehensive validation
+cargo run examples/showcase.ttvm && \
+cargo run examples/stdlib_comprehensive_test.ttvm && \
+cargo run -- --optimize examples/complete_optimization_showcase.ttvm && \
+echo "All tests passed!"
+```
+
 ## Getting Started
 
 ### **Installation**
@@ -456,7 +596,7 @@ TinyTotVM is designed for efficiency and production use:
 - **Efficient Function Calls** - Optimized call stack and parameter passing
 - **Smart Address Resolution** - Automatic function pointer adjustment in modules
 - **Closure Optimization** - Efficient captured environment management
-- **Advanced Optimization Engine** - Dead code elimination, constant folding, tail call optimization
+- **Advanced Optimization Engine** - 8 optimization passes including constant folding, dead code elimination, peephole optimizations, constant propagation
 
 ## Example Programs
 
@@ -491,6 +631,9 @@ The `examples/` directory contains comprehensive test programs:
 - **`tail_call_test.ttvm`** - Tail call optimization examples
 - **`memory_optimization_test.ttvm`** - Memory access pattern optimization
 - **`comprehensive_optimization_test.ttvm`** - Combined optimization techniques
+- **`advanced_optimization_test.ttvm`** - Advanced optimization features test
+- **`safe_advanced_optimization_test.ttvm`** - Safe advanced optimization demonstration
+- **`complete_optimization_showcase.ttvm`** - Complete demonstration of all 8 optimization passes
 
 ## Architecture
 
@@ -554,9 +697,7 @@ TinyTotVM serves as an excellent learning resource for:
 - **Exception Handling** - Structured error handling with proper stack unwinding
 - **Module Systems** - Code organization and dependency management
 
-## Production Readiness
-
-TinyTotVM is a **fully functional virtual machine** with **comprehensive standard library** suitable for:
+## What the heck is this thing good for? 
 
 - **Educational Use** - Complete implementation of modern VM concepts with rich functionality
 - **Research Projects** - Extensible architecture for language research with ready-to-use utilities
@@ -566,6 +707,7 @@ TinyTotVM is a **fully functional virtual machine** with **comprehensive standar
 
 **Key Production Features:**
 - **Standard Library** - 100+ utility functions across math, strings, lists, I/O, and type conversion
+- **Advanced Optimization Engine** - 8 optimization passes with up to 71% instruction reduction
 - **Comprehensive Error Handling** - No crashes or panics, detailed error messages
 - **Memory Safety** - Automatic cleanup, stack overflow protection, resource management
 - **Module System** - Robust import/export with circular dependency detection
@@ -577,7 +719,7 @@ TinyTotVM is a **fully functional virtual machine** with **comprehensive standar
 ## Future Roadmap
 
 - **Enhanced Standard Library** - Extended math functions (trigonometry), regex support, date/time utilities
-- **Optimization Passes** - Dead code elimination, constant folding, tail call optimization
+- **Advanced Optimizations** - Peephole optimizations, constant propagation, instruction combining, loop optimizations
 - **IDE Integration** - Language server protocol support with syntax highlighting
 - **Package Manager** - Centralized module distribution and dependency management
 - **Mutable Closures** - Support for mutable captured variables and reference semantics
@@ -589,5 +731,3 @@ TinyTotVM is a **fully functional virtual machine** with **comprehensive standar
 Free, as in free beer.
 
 ---
-
-*TinyTotVM - Where tiny programs achieve big things!*

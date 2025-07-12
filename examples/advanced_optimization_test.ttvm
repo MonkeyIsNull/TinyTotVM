@@ -1,0 +1,70 @@
+; Advanced Optimization Test
+; Tests peephole optimizations, constant propagation, instruction combining, and jump threading
+
+PUSH_STR "=== Advanced Optimization Test ==="
+PRINT
+
+; Constant propagation test
+PUSH_INT 42
+STORE answer
+LOAD answer    ; Should be replaced with PUSH_INT 42
+PRINT
+
+; Peephole optimization: identity operations
+PUSH_INT 100
+PUSH_INT 0
+ADD            ; Should be optimized to just PUSH_INT 100
+PRINT
+
+PUSH_FLOAT 7.5
+PUSH_FLOAT 1.0
+MUL_F          ; Should be optimized to just PUSH_FLOAT 7.5
+PRINT
+
+; Double negation elimination
+TRUE
+NOT
+NOT            ; Should be optimized to just TRUE
+PRINT
+
+; Instruction combining: conditional jumps
+FALSE
+JZ always_jump   ; Should be combined to JMP always_jump
+
+PUSH_STR "This should be skipped"
+PRINT
+
+LABEL always_jump
+PUSH_STR "Jumped correctly"
+PRINT
+
+; Jump threading test
+JMP jump_to_jump
+
+LABEL jump_to_jump
+JMP final_destination
+
+PUSH_STR "Dead code"
+PRINT
+
+LABEL final_destination
+PUSH_STR "Jump threading worked"
+PRINT
+
+; Constant propagation with multiple variables
+PUSH_STR "Hello"
+STORE greeting
+PUSH_STR " World"
+STORE suffix
+LOAD greeting    ; Should propagate constant
+LOAD suffix      ; Should propagate constant
+CONCAT
+PRINT
+
+; Self-comparison optimization
+PUSH_INT 123
+DUP
+EQ             ; Should be optimized to TRUE
+PRINT
+
+HALT

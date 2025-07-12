@@ -1466,6 +1466,10 @@ fn optimize_program(input_file: &str, output_file: &str) {
     println!("Dead instructions removed: {}", stats.dead_instructions_removed);
     println!("Tail calls optimized: {}", stats.tail_calls_optimized);
     println!("Memory operations optimized: {}", stats.memory_operations_optimized);
+    println!("Peephole optimizations: {}", stats.peephole_optimizations_applied);
+    println!("Constants propagated: {}", stats.constants_propagated);
+    println!("Instructions combined: {}", stats.instructions_combined);
+    println!("Jumps threaded: {}", stats.jumps_threaded);
     println!();
 
     // Write optimized program to file
@@ -1657,6 +1661,10 @@ fn main() {
         println!("Dead instructions removed: {}", stats.dead_instructions_removed);
         println!("Tail calls optimized: {}", stats.tail_calls_optimized);
         println!("Memory operations optimized: {}", stats.memory_operations_optimized);
+        println!("Peephole optimizations: {}", stats.peephole_optimizations_applied);
+        println!("Constants propagated: {}", stats.constants_propagated);
+        println!("Instructions combined: {}", stats.instructions_combined);
+        println!("Jumps threaded: {}", stats.jumps_threaded);
         println!();
     }
 

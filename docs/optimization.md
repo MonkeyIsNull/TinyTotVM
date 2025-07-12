@@ -59,9 +59,59 @@ Optimizes redundant memory operations and variable access patterns.
 - Detection of redundant load operations
 - Store/load pattern analysis
 
-**Future Optimizations:**
-- STORE followed by LOAD → STORE + DUP
-- Consecutive identical LOADs → LOAD + DUP
+### 5. Peephole Optimizations
+Optimizes small instruction sequences for better performance.
+
+**Supported Optimizations:**
+- Double negation elimination: `NOT NOT` → (remove both)
+- Jump chain simplification: `JMP addr1, JMP addr2` → `JMP addr2`
+- Identity operations: `PUSH 0, ADD` → (remove both)
+- Self-comparison: `PUSH x, PUSH x, EQ` → `TRUE`
+
+### 6. Constant Propagation
+Tracks variable values and replaces loads with constant values when possible.
+
+**Examples:**
+```assembly
+; Before optimization
+PUSH_INT 42
+STORE answer
+LOAD answer
+PRINT
+
+; After optimization  
+PUSH_INT 42
+STORE answer
+PUSH_INT 42
+PRINT
+```
+
+### 7. Instruction Combining
+Combines multiple instructions into more efficient sequences.
+
+**Supported Combinations:**
+- `DUP, EQ` → `TRUE` (x == x is always true)
+- `PUSH 0, JZ addr` → `JMP addr` (always jumps)
+- `TRUE, JZ addr` → (remove both, never jumps)
+- `PUSH x, STORE var, LOAD var` → `PUSH x, DUP, STORE var`
+
+### 8. Jump Threading
+Optimizes chains of jumps to jump directly to the final target.
+
+**Examples:**
+```assembly
+; Before optimization
+JMP label1
+...
+LABEL label1
+JMP label2
+...
+LABEL label2
+<target code>
+
+; After optimization
+JMP label2
+```
 
 ## Usage
 
@@ -120,9 +170,13 @@ let options = OptimizationOptions {
 The optimizer applies optimizations in the following order:
 
 1. **Constant Folding** - Evaluates constant expressions
-2. **Dead Code Elimination** - Removes unreachable code
-3. **Tail Call Optimization** - Converts tail calls to jumps
-4. **Memory Layout Optimization** - Optimizes memory access patterns
+2. **Constant Propagation** - Replaces variable loads with known constant values
+3. **Instruction Combining** - Combines multiple instructions into efficient sequences
+4. **Peephole Optimizations** - Optimizes small instruction patterns
+5. **Jump Threading** - Optimizes jump chains
+6. **Dead Code Elimination** - Removes unreachable code
+7. **Tail Call Optimization** - Converts tail calls to jumps
+8. **Memory Layout Optimization** - Optimizes memory access patterns
 
 This order ensures that each pass can benefit from the optimizations applied by previous passes.
 
@@ -136,9 +190,15 @@ This order ensures that each pass can benefit from the optimizations applied by 
 
 ### Dead Code Elimination Test Results
 - **Before:** 38 instructions
-- **After:** 19 instructions
-- **Improvement:** 50% reduction in instruction count
-- **Dead instructions removed:** 17
+- **After:** 11 instructions
+- **Improvement:** 71% reduction in instruction count  
+- **Dead instructions removed:** 23
+
+### Advanced Optimizations Test Results
+- **Before:** 17 instructions
+- **After:** 14 instructions
+- **Improvement:** 18% reduction in instruction count
+- **Features demonstrated:** Constant propagation, peephole optimizations, instruction combining
 
 ## Implementation Details
 

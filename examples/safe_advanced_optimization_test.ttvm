@@ -1,0 +1,31 @@
+; Safe Advanced Optimization Test
+; Tests new optimizations with safer patterns
+
+PUSH_STR "=== Safe Advanced Optimization Test ==="
+PRINT
+
+; Constant propagation test
+PUSH_INT 42
+STORE answer
+LOAD answer    ; Should be replaced with PUSH_INT 42
+PRINT
+
+; Simple peephole optimization: double negation
+TRUE
+NOT
+NOT            ; Should be optimized to just TRUE
+PRINT
+
+; Jump threading test - simpler pattern
+JMP target1
+
+LABEL target1
+PUSH_STR "Direct jump worked"
+PRINT
+JMP end_test
+
+LABEL end_test
+PUSH_STR "Test completed"
+PRINT
+
+HALT
