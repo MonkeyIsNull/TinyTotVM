@@ -1,0 +1,30 @@
+; Test module system
+
+; Import math module
+IMPORT examples/math_module.ttvm
+
+; Test add function
+PUSH_INT 5
+PUSH_INT 3
+LOAD add
+CALL_FUNCTION
+PRINT
+
+; Test multiply function
+PUSH_FLOAT 4.0
+PUSH_FLOAT 2.5
+LOAD multiply
+CALL_FUNCTION
+PRINT
+
+; Test square function
+PUSH_FLOAT 6.0
+LOAD square
+CALL_FUNCTION
+PRINT
+
+; Test constant
+LOAD PI
+PRINT
+
+HALT

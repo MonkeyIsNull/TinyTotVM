@@ -1,0 +1,45 @@
+; Comprehensive module system test
+
+; Import multiple modules
+IMPORT examples/math_module.ttvm
+IMPORT examples/string_utils.ttvm
+
+; Test math functions
+PUSH_STR "Testing math functions:"
+PRINT
+
+PUSH_INT 15
+PUSH_INT 25
+LOAD add
+CALL_FUNCTION
+PRINT
+
+PUSH_FLOAT 7.5
+LOAD square
+CALL_FUNCTION
+PRINT
+
+; Test string functions
+PUSH_STR "Testing string functions:"
+PRINT
+
+LOAD greeting
+PUSH_STR "World!"
+LOAD strcat
+CALL_FUNCTION
+PRINT
+
+; Test constants
+PUSH_STR "PI value:"
+PRINT
+LOAD PI
+PRINT
+
+; Test mixed usage
+LOAD greeting
+PUSH_STR "TinyTotVM!"
+LOAD strcat
+CALL_FUNCTION
+PRINT
+
+HALT

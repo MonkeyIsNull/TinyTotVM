@@ -1,0 +1,38 @@
+; String utilities module
+
+; Skip function definitions
+JMP main_module
+
+; String length function (simulated by converting to list and getting length)
+LABEL strlen_func
+LOAD str
+; In a real implementation, we'd have a proper string length operation
+; For now, we'll just return a fixed length
+PUSH_INT 10
+RET
+
+; String concatenation is already built-in with CONCAT
+LABEL concat_func
+LOAD str1
+LOAD str2
+CONCAT
+RET
+
+LABEL main_module
+
+; Export string length function
+MAKE_FUNCTION strlen_func str
+STORE strlen
+EXPORT strlen
+
+; Export concat function  
+MAKE_FUNCTION concat_func str1 str2
+STORE strcat
+EXPORT strcat
+
+; Export a greeting template
+PUSH_STR "Hello, "
+STORE greeting
+EXPORT greeting
+
+HALT

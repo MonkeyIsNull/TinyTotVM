@@ -162,6 +162,9 @@ enum OpCode {
     Catch,             // start catch block (exception is on stack)
     Throw,             // throw exception from stack
     EndTry,            // end try block
+    // Module system
+    Import(String),    // import module by path
+    Export(String),    // export variable/function by name
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +183,10 @@ struct VM {
     variables: Vec<HashMap<String, Value>>, // call frame stack
     // Exception handling
     try_stack: Vec<ExceptionHandler>,       // stack of try blocks
+    // Module system
+    exports: HashMap<String, Value>,        // exported symbols from this module
+    loaded_modules: HashMap<String, HashMap<String, Value>>, // module_path -> exports
+    loading_stack: Vec<String>,             // for circular dependency detection
     // Performance improvements
     max_stack_size: usize,                  // Track maximum stack usage
     instruction_count: usize,               // Count of executed instructions
@@ -197,6 +204,9 @@ impl VM {
             call_stack: Vec::with_capacity(64), // Pre-allocate call stack
             variables: vec![HashMap::new()], // global frame
             try_stack: Vec::new(),
+            exports: HashMap::new(),
+            loaded_modules: HashMap::new(),
+            loading_stack: Vec::new(),
             max_stack_size: 0,
             instruction_count: 0,
             debug_mode: false,
@@ -993,6 +1003,12 @@ impl VM {
                     // Pop the exception handler when exiting try block normally
                     self.pop_exception_handler();
                 }
+                OpCode::Import(path) => {
+                    self.import_module(path)?;
+                }
+                OpCode::Export(name) => {
+                    self.export_symbol(name)?;
+                }
                 OpCode::Halt => {
                     // This should never be reached since HALT is handled in run()
                     unreachable!("HALT instruction should be handled in run() method")
@@ -1000,6 +1016,94 @@ impl VM {
             }
             Ok(())
         }
+
+    fn import_module(&mut self, path: &str) -> VMResult<()> {
+        // Check for circular dependencies using global loading stack
+        if self.loading_stack.contains(&path.to_string()) {
+            return Err(VMError::FileError {
+                filename: path.to_string(),
+                error: "Circular dependency detected".to_string(),
+            });
+        }
+
+        // Check if module is already loaded
+        if let Some(exports) = self.loaded_modules.get(path).cloned() {
+            // Module already loaded, import its exports into current scope
+            for (name, value) in exports {
+                self.set_variable(name, value)?;
+            }
+            return Ok(());
+        }
+
+        // Add to loading stack to detect circular dependencies
+        self.loading_stack.push(path.to_string());
+
+        // Load and parse the module
+        let module_instructions = parse_program(path)?;
+        
+        // Merge module instructions into main VM's instruction space
+        let base_addr = self.instructions.len();
+        let mut adjusted_exports = HashMap::new();
+        
+        // Append module instructions to main instruction space
+        self.instructions.extend(module_instructions.clone());
+        
+        // Create a new VM with the module instructions to get exports
+        // Share the loading context to detect circular dependencies
+        let mut module_vm = VM::new(module_instructions);
+        module_vm.debug_mode = self.debug_mode;
+        module_vm.loading_stack = self.loading_stack.clone(); // Share loading context
+        module_vm.loaded_modules = self.loaded_modules.clone(); // Share loaded modules
+        
+        // Run the module to generate exports
+        module_vm.run()?;
+        
+        // Update our loaded modules with any new modules the sub-module loaded
+        self.loaded_modules.extend(module_vm.loaded_modules);
+        
+        // Adjust function addresses in exports to point to merged instruction space
+        for (name, value) in module_vm.exports {
+            let adjusted_value = match value {
+                Value::Function { addr, params } => {
+                    Value::Function { 
+                        addr: addr + base_addr,  // Adjust address to merged space
+                        params 
+                    }
+                }
+                other => other
+            };
+            adjusted_exports.insert(name, adjusted_value);
+        }
+        
+        // Cache the loaded module
+        self.loaded_modules.insert(path.to_string(), adjusted_exports.clone());
+        
+        // Import the exports into current scope
+        if self.debug_mode {
+            println!("Importing {} exports from module {}", adjusted_exports.len(), path);
+        }
+        for (name, value) in adjusted_exports {
+            if self.debug_mode {
+                println!("Importing export: {} = {:?}", name, value);
+            }
+            self.set_variable(name, value)?;
+        }
+        
+        // Remove from loading stack
+        self.loading_stack.pop();
+        
+        Ok(())
+    }
+
+    fn export_symbol(&mut self, name: &str) -> VMResult<()> {
+        // Get the value from current scope
+        let value = self.get_variable(name)?.clone();
+        
+        // Add to exports
+        self.exports.insert(name.to_string(), value);
+        
+        Ok(())
+    }
 }
 
 fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
@@ -1178,6 +1282,20 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "END_TRY" => OpCode::EndTry,
             "READ_FILE" => OpCode::ReadFile,
             "WRITE_FILE" => OpCode::WriteFile,
+            "IMPORT" => {
+                let path = parts[1].trim();
+                // Remove quotes if present
+                let path = if path.starts_with('"') && path.ends_with('"') {
+                    path[1..path.len()-1].to_string()
+                } else {
+                    path.to_string()
+                };
+                OpCode::Import(path)
+            }
+            "EXPORT" => {
+                let name = parts[1].trim().to_string();
+                OpCode::Export(name)
+            }
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
         };
         program.push(opcode);
