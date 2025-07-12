@@ -586,7 +586,7 @@ cargo run program.ttvm
 
 ## Performance Features
 
-TinyTotVM is designed for efficiency and production use:
+TinyTotVM is designed for efficiency and experimental use:
 
 - **Pre-allocated Stacks** - 1024-item stack, 64-item call stack for optimal performance
 - **Instruction Counting** - Performance metrics and profiling with execution statistics
@@ -703,9 +703,9 @@ TinyTotVM serves as an excellent learning resource for:
 - **Research Projects** - Extensible architecture for language research with ready-to-use utilities
 - **Embedded Scripting** - Lightweight runtime with full standard library for applications
 - **Prototyping** - Rapid development of domain-specific languages with built-in utilities
-- **Real Applications** - Production-ready runtime with math, string, list, and I/O operations
+- **Experimental Applications** - Runtime with math, string, list, and I/O operations
 
-**Key Production Features:**
+**Key Features:**
 - **Standard Library** - 100+ utility functions across math, strings, lists, I/O, and type conversion
 - **Advanced Optimization Engine** - 8 optimization passes with up to 71% instruction reduction
 - **Comprehensive Error Handling** - No crashes or panics, detailed error messages
