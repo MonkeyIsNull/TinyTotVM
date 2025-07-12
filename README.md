@@ -35,7 +35,7 @@ TinyTotVM is a **toy virtual machine** with features found in modern programming
 - **Advanced Function System** - First-class functions, closures, higher-order programming
 - **Robust Module System** - Import/export with dependency management and closure support
 - **Exception Handling** - Structured error handling with stack unwinding
-- **Advanced Optimization Engine** - 8 optimization passes for production-grade performance
+- **Advanced Optimization Engine** - 8 optimization passes for performance
 - **Memory Safety** - No crashes, comprehensive error handling, automatic cleanup
 - **Cross-Platform** - Pure Rust implementation, runs anywhere Rust compiles
 - **Educational Value** - Clean architecture demonstrating VM design principles
