@@ -1,0 +1,124 @@
+; TinyTotVM Network I/O Comprehensive Test
+; Tests all the new network capabilities
+
+PUSH_STR "=== TinyTotVM Network I/O Test ==="
+PRINT
+
+; Test 1: DNS Resolution
+PUSH_STR "--- DNS Resolution ---"
+PRINT
+
+PUSH_STR "localhost"
+DNS_RESOLVE
+PRINT
+
+PUSH_STR "google.com"
+DNS_RESOLVE
+PRINT
+
+; Test 2: HTTP Operations (mock)
+PUSH_STR "--- HTTP Operations ---"
+PRINT
+
+PUSH_STR "https://api.github.com/users/octocat"
+HTTP_GET
+PRINT
+
+PUSH_STR "https://httpbin.org/post"
+PUSH_STR "{\"test\": \"data\"}"
+HTTP_POST
+PRINT
+
+; Test 3: TCP Operations
+PUSH_STR "--- TCP Operations ---"
+PRINT
+
+; Try to connect to a common service (will likely fail but demonstrates usage)
+TRY
+    PUSH_STR "google.com"
+    PUSH_INT 80
+    TCP_CONNECT
+    STORE tcp_conn
+    
+    PUSH_STR "Connected to Google!"
+    PRINT
+    
+    ; Send HTTP request
+    LOAD tcp_conn
+    PUSH_STR "GET / HTTP/1.0\r\n\r\n"
+    TCP_SEND
+    PRINT
+    
+    ; Receive response
+    LOAD tcp_conn
+    PUSH_INT 1024
+    TCP_RECV
+    PRINT
+
+CATCH error
+    PUSH_STR "TCP connection failed (expected): "
+    LOAD error
+    CONCAT
+    PRINT
+END_TRY
+
+; Test 4: TCP Listener (will bind to available port)
+PUSH_STR "--- TCP Listener ---"
+PRINT
+
+TRY
+    PUSH_INT 0  ; Use port 0 to get any available port
+    TCP_LISTEN
+    STORE tcp_listener
+    
+    PUSH_STR "TCP listener created:"
+    PRINT
+    LOAD tcp_listener
+    PRINT
+
+CATCH error
+    PUSH_STR "TCP listen failed: "
+    LOAD error
+    CONCAT
+    PRINT
+END_TRY
+
+; Test 5: UDP Operations
+PUSH_STR "--- UDP Operations ---"
+PRINT
+
+TRY
+    PUSH_INT 0  ; Use port 0 to get any available port
+    UDP_BIND
+    STORE udp_socket
+    
+    PUSH_STR "UDP socket bound:"
+    PRINT
+    LOAD udp_socket
+    PRINT
+    
+    ; Test UDP send (mock)
+    LOAD udp_socket
+    PUSH_STR "127.0.0.1"
+    PUSH_INT 12345
+    PUSH_STR "Hello UDP!"
+    UDP_SEND
+    PRINT
+    
+    ; Test UDP receive (mock)
+    LOAD udp_socket
+    PUSH_INT 1024
+    UDP_RECV
+    PRINT
+
+CATCH error
+    PUSH_STR "UDP operations failed: "
+    LOAD error
+    CONCAT
+    PRINT
+END_TRY
+
+PUSH_STR "=== Network I/O Test Complete ==="
+PRINT
+
+HALT

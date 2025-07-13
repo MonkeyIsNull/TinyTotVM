@@ -1,0 +1,38 @@
+; Simple Network I/O Test
+
+PUSH_STR "=== Simple Network Test ==="
+PRINT
+
+; Test DNS Resolution
+PUSH_STR "Testing DNS resolution..."
+PRINT
+
+PUSH_STR "localhost"
+DNS_RESOLVE
+PRINT
+
+PUSH_STR "google.com"
+DNS_RESOLVE
+PRINT
+
+; Test HTTP GET (mock)
+PUSH_STR "Testing HTTP GET..."
+PRINT
+
+PUSH_STR "https://api.github.com/users/octocat"
+HTTP_GET
+PRINT
+
+; Test HTTP POST (mock)
+PUSH_STR "Testing HTTP POST..."
+PRINT
+
+PUSH_STR "https://httpbin.org/post"
+PUSH_STR "{\"test\": \"data\"}"
+HTTP_POST
+PRINT
+
+PUSH_STR "=== Simple Network Test Complete ==="
+PRINT
+
+HALT

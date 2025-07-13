@@ -1,0 +1,19 @@
+; Simple I/O test
+
+PUSH_STR "Testing file creation..."
+PRINT
+
+; Create a test file  
+PUSH_STR "Hello from TinyTotVM!"
+PUSH_STR "/tmp/ttvm_test.txt"
+WRITE_FILE
+
+PUSH_STR "File created, checking existence..."
+PRINT
+
+; Check if file exists
+PUSH_STR "/tmp/ttvm_test.txt"
+FILE_EXISTS
+PRINT
+
+HALT

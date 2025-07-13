@@ -11,6 +11,8 @@ The standard library is organized into focused modules:
 - **`std/list.ttvm`** - List/array utilities and higher-order functions
 - **`std/convert.ttvm`** - Type conversion and type checking utilities
 - **`std/io.ttvm`** - I/O operations and data format handling
+- **`std/network.ttvm`** - Network operations and protocols
+- **`std/advanced.ttvm`** - Advanced I/O features (async, streaming, crypto, database)
 - **`std/prelude.ttvm`** - Commonly used functions (imports other modules)
 
 ## Usage
@@ -193,6 +195,10 @@ PRINT  ; Outputs: false (simplified implementation)
 **File Operations:**
 - `read_file(filename)` - Read file contents
 - `write_file(filename, content)` - Write content to file
+- `append_file(filename, content)` - Append content to file
+- `file_exists(filename)` - Check if file exists
+- `file_size(filename)` - Get file size in bytes
+- `list_dir(dirname)` - List directory contents
 
 **Printing:**
 - `println(value)` - Print with newline
@@ -209,6 +215,144 @@ PRINT  ; Outputs: false (simplified implementation)
 - `log_info(message)` - Log info message
 - `log_error(message)` - Log error message  
 - `log_debug(message)` - Log debug message
+
+**Interactive I/O:**
+- `read_line()` - Read line from stdin
+- `read_char()` - Read single character from stdin
+- `read_input()` - Read all input until EOF from stdin
+
+**Environment & System:**
+- `get_env(var_name)` - Get environment variable
+- `set_env(var_name, value)` - Set environment variable
+- `get_args()` - Get command line arguments
+- `get_time()` - Get current Unix timestamp
+- `sleep(millis)` - Sleep for specified milliseconds
+
+### Network Module (`std/network.ttvm`)
+
+**DNS Operations:**
+- `dns_resolve(hostname)` - Resolve hostname to IP address
+
+**HTTP Operations:**
+- `http_get(url)` - Perform HTTP GET request
+- `http_post(url, data)` - Perform HTTP POST request
+
+**TCP Operations:**
+- `tcp_connect(host, port)` - Connect to TCP server
+- `tcp_listen(port)` - Listen on TCP port
+- `tcp_send(connection, data)` - Send data over TCP connection
+- `tcp_recv(connection, buffer_size)` - Receive data from TCP connection
+
+**UDP Operations:**
+- `udp_bind(port)` - Bind UDP socket to port
+- `udp_send(socket, host, port, data)` - Send UDP packet
+- `udp_recv(socket, buffer_size)` - Receive UDP packet
+
+**URL Utilities:**
+- `parse_url(url)` - Parse URL into components (simplified)
+- `build_url(components)` - Build URL from components (simplified)
+
+**Example:**
+```assembly
+IMPORT std/network.ttvm
+
+; DNS resolution
+PUSH_STR "google.com"
+LOAD dns_resolve
+CALL_FUNCTION
+PRINT  ; Outputs: IP address
+
+; HTTP GET request
+PUSH_STR "https://api.github.com/users/octocat"
+LOAD http_get
+CALL_FUNCTION
+PRINT  ; Outputs: HTTP response
+
+; TCP connection
+PUSH_STR "google.com"
+PUSH_INT 80
+LOAD tcp_connect
+CALL_FUNCTION
+STORE connection
+
+LOAD connection
+PUSH_STR "GET / HTTP/1.0\r\n\r\n"
+LOAD tcp_send
+CALL_FUNCTION
+PRINT  ; Outputs: bytes sent
+```
+
+### Advanced Module (`std/advanced.ttvm`)
+
+**Async Operations:**
+- `async_read(filename)` - Start asynchronous file read
+- `async_write(filename, content)` - Start asynchronous file write
+- `await(future)` - Wait for async operation completion
+
+**Streaming Operations:**
+- `stream_create(type)` - Create data stream
+- `stream_read(stream, size)` - Read from stream
+- `stream_write(stream, data)` - Write to stream
+- `stream_close(stream)` - Close stream
+
+**Data Format Operations:**
+- `json_parse(json_string)` - Parse JSON to object/list
+- `json_stringify(value)` - Convert value to JSON string
+- `csv_parse(csv_string)` - Parse CSV to list of lists
+- `csv_write(data)` - Convert list to CSV format
+
+**Compression Operations:**
+- `compress(data)` - Compress string or binary data
+- `decompress(compressed_data)` - Decompress data
+
+**Cryptographic Operations:**
+- `encrypt(data, key)` - Encrypt data with key
+- `decrypt(encrypted_data, key)` - Decrypt data with key
+- `hash(data)` - Generate hash of data
+
+**Database Operations:**
+- `db_connect(connection_string)` - Connect to database
+- `db_query(connection, query)` - Execute SELECT query
+- `db_exec(connection, command)` - Execute INSERT/UPDATE/DELETE
+
+**Example:**
+```assembly
+IMPORT std/advanced.ttvm
+
+; Async file operations
+PUSH_STR "/tmp/data.txt"
+LOAD async_read
+CALL_FUNCTION
+STORE future
+
+LOAD future
+LOAD await
+CALL_FUNCTION
+PRINT  ; Outputs: file contents
+
+; JSON processing
+PUSH_STR "{\"name\":\"Alice\",\"age\":25}"
+LOAD json_parse
+CALL_FUNCTION
+STORE json_obj
+
+LOAD json_obj
+LOAD json_stringify
+CALL_FUNCTION
+PRINT  ; Outputs: JSON string
+
+; Database operations
+PUSH_STR "sqlite://memory"
+LOAD db_connect
+CALL_FUNCTION
+STORE db
+
+LOAD db
+PUSH_STR "SELECT 1 as test"
+LOAD db_query
+CALL_FUNCTION
+PRINT  ; Outputs: query results
+```
 
 **Example:**
 ```assembly

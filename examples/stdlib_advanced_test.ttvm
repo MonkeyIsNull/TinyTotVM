@@ -1,0 +1,140 @@
+; Test advanced features standard library
+
+IMPORT std/advanced.ttvm
+
+PUSH_STR "=== Advanced Features Standard Library Test ==="
+PRINT
+
+; Test async operations
+PUSH_STR "--- Async Operations ---"
+PRINT
+
+; Create a test file first
+PUSH_STR "Async test content"
+PUSH_STR "/tmp/stdlib_async_test.txt"
+WRITE_FILE
+
+PUSH_STR "/tmp/stdlib_async_test.txt"
+LOAD async_read
+CALL_FUNCTION
+STORE future
+
+LOAD future
+LOAD await
+CALL_FUNCTION
+PRINT
+
+; Test streaming
+PUSH_STR "--- Streaming ---"
+PRINT
+
+PUSH_STR "buffer"
+LOAD stream_create
+CALL_FUNCTION
+STORE stream
+
+LOAD stream
+PUSH_STR "Stream test data"
+LOAD stream_write
+CALL_FUNCTION
+PRINT
+
+LOAD stream
+PUSH_INT 100
+LOAD stream_read
+CALL_FUNCTION
+PRINT
+
+LOAD stream
+LOAD stream_close
+CALL_FUNCTION
+PRINT
+
+; Test data formats
+PUSH_STR "--- Data Formats ---"
+PRINT
+
+PUSH_STR "{\"test\":true}"
+LOAD json_parse
+CALL_FUNCTION
+STORE json_obj
+
+LOAD json_obj
+LOAD json_stringify
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "name,age\nAlice,25\nBob,30"
+LOAD csv_parse
+CALL_FUNCTION
+STORE csv_data
+
+LOAD csv_data
+LOAD csv_write
+CALL_FUNCTION
+PRINT
+
+; Test compression
+PUSH_STR "--- Compression ---"
+PRINT
+
+PUSH_STR "Data to compress"
+LOAD compress
+CALL_FUNCTION
+STORE compressed
+
+LOAD compressed
+LOAD decompress
+CALL_FUNCTION
+PRINT
+
+; Test crypto
+PUSH_STR "--- Cryptography ---"
+PRINT
+
+PUSH_STR "Secret data"
+PUSH_STR "my_key"
+LOAD encrypt
+CALL_FUNCTION
+STORE encrypted
+
+LOAD encrypted
+PUSH_STR "my_key"
+LOAD decrypt
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "Hash this data"
+LOAD hash
+CALL_FUNCTION
+PRINT
+
+; Test database
+PUSH_STR "--- Database ---"
+PRINT
+
+PUSH_STR "sqlite://memory"
+LOAD db_connect
+CALL_FUNCTION
+STORE db
+
+LOAD db
+PUSH_STR "SELECT 1 as test"
+LOAD db_query
+CALL_FUNCTION
+PRINT
+
+LOAD db
+PUSH_STR "CREATE TABLE test (id INTEGER)"
+LOAD db_exec
+CALL_FUNCTION
+PRINT
+
+; Clean up
+PUSH_STR "/tmp/stdlib_async_test.txt"
+DELETE_FILE
+
+PUSH_STR "=== Advanced Features Standard Library Test Complete ==="
+PRINT
+
+HALT

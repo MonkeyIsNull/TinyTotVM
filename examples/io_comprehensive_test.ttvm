@@ -1,0 +1,124 @@
+; TinyTotVM Comprehensive I/O Test
+; Tests all the new I/O capabilities implemented
+
+PUSH_STR "=== TinyTotVM I/O Comprehensive Test ==="
+PRINT
+
+; Test 1: Environment variables
+PUSH_STR "--- Environment Variables ---"
+PRINT
+
+PUSH_STR "HOME"
+GET_ENV
+PRINT
+
+PUSH_STR "TEST_VAR"
+PUSH_STR "test_value"
+SET_ENV
+
+PUSH_STR "TEST_VAR" 
+GET_ENV
+PRINT
+
+; Test 2: Command line arguments
+PUSH_STR "--- Command Line Arguments ---"
+PRINT
+
+GET_ARGS
+PRINT
+
+; Test 3: File operations
+PUSH_STR "--- File Operations ---"
+PRINT
+
+; Create a test file
+PUSH_STR "Hello from TinyTotVM!"
+PUSH_STR "/tmp/ttvm_test.txt"
+WRITE_FILE
+
+; Check if file exists
+PUSH_STR "/tmp/ttvm_test.txt"
+FILE_EXISTS
+PRINT
+
+; Get file size
+PUSH_STR "/tmp/ttvm_test.txt"
+FILE_SIZE
+PRINT
+
+; Append to file
+PUSH_STR "\nAppended line!"
+PUSH_STR "/tmp/ttvm_test.txt"
+APPEND_FILE
+
+; Read back the file
+PUSH_STR "/tmp/ttvm_test.txt"
+READ_FILE
+PRINT
+
+; Test 4: Binary operations
+PUSH_STR "--- Binary Operations ---"
+PRINT
+
+; Create some binary data and write it
+PUSH_STR "Binary test data"
+PUSH_STR "/tmp/ttvm_binary.dat"
+WRITE_FILE
+
+; Read as bytes
+PUSH_STR "/tmp/ttvm_binary.dat"
+READ_BYTES
+PRINT
+
+; Test 5: Directory operations
+PUSH_STR "--- Directory Operations ---"
+PRINT
+
+PUSH_STR "/tmp"
+LIST_DIR
+PRINT
+
+; Test 6: Time operations
+PUSH_STR "--- Time Operations ---"
+PRINT
+
+GET_TIME
+PRINT
+
+; Format time (simplified)
+GET_TIME
+PUSH_STR "%Y-%m-%d"
+FORMAT_TIME
+PRINT
+
+; Test 7: Process execution
+PUSH_STR "--- Process Execution ---"
+PRINT
+
+; Execute echo command
+PUSH_STR "echo"
+PUSH_STR "Hello"
+PUSH_STR "from"
+PUSH_STR "TinyTotVM"
+MAKE_LIST 3
+EXEC
+PRINT
+
+; Execute with capture
+PUSH_STR "echo"
+PUSH_STR "Captured output"
+MAKE_LIST 1
+EXEC_CAPTURE
+PRINT
+
+; Clean up test files
+PUSH_STR "/tmp/ttvm_test.txt"
+DELETE_FILE
+
+PUSH_STR "/tmp/ttvm_binary.dat"
+DELETE_FILE
+
+PUSH_STR "=== I/O Test Complete ==="
+PRINT
+
+HALT

@@ -43,7 +43,7 @@ TinyTotVM is a **toy virtual machine** with features found in modern programming
 
 ### **Core Language Features**
 - **Stack-based Architecture** - Efficient execution with pre-allocated memory
-- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Function, Closure values
+- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Bytes, Connection, Stream, Future, Function, Closure values
 - **Type Coercion** - Automatic conversion between compatible types (int <-> float)
 - **Memory Management** - Automatic cleanup via Rust's ownership system
 - **Error Handling** - Comprehensive Result-based error system instead of crashes
@@ -171,7 +171,7 @@ CALL_FUNCTION          ; Outputs: sum of elements
 - **String Utilities** - Concatenation, repetition, case conversion, trimming
 - **List Operations** - Length, first/last, higher-order functions (map, filter, reduce)
 - **Type Conversion** - Convert between types with safety checks
-- **I/O Utilities** - Very basic File operations
+- **I/O Utilities** - Comprehensive I/O operations including file, environment, and process control
 - **Prelude Module** - Common functions imported together for convenience
 
 ### **Advanced Optimization Engine**
@@ -299,6 +299,54 @@ EXPORT name        ; Export variable/function by name
 PRINT              ; Print top stack value
 READ_FILE          ; Read file contents to string
 WRITE_FILE         ; Write string to file
+READ_LINE          ; Read line from stdin
+READ_CHAR          ; Read single character from stdin
+READ_INPUT         ; Read all input until EOF from stdin
+APPEND_FILE        ; Append content to file
+FILE_EXISTS        ; Check if file exists
+FILE_SIZE          ; Get file size in bytes
+DELETE_FILE        ; Delete a file
+LIST_DIR           ; List directory contents
+READ_BYTES         ; Read file as byte array
+WRITE_BYTES        ; Write byte array to file
+GET_ENV            ; Get environment variable
+SET_ENV            ; Set environment variable
+GET_ARGS           ; Get command line arguments
+EXEC               ; Execute external command
+EXEC_CAPTURE       ; Execute command and capture output
+EXIT               ; Exit with status code
+GET_TIME           ; Get current Unix timestamp
+SLEEP              ; Sleep for specified milliseconds
+FORMAT_TIME        ; Format timestamp to string
+HTTP_GET           ; HTTP GET request
+HTTP_POST          ; HTTP POST request
+TCP_CONNECT        ; Connect to TCP server
+TCP_LISTEN         ; Listen on TCP port
+TCP_SEND           ; Send data over TCP connection
+TCP_RECV           ; Receive data from TCP connection
+UDP_BIND           ; Bind UDP socket to port
+UDP_SEND           ; Send UDP packet
+UDP_RECV           ; Receive UDP packet
+DNS_RESOLVE        ; Resolve hostname to IP address
+ASYNC_READ         ; Asynchronous file read
+ASYNC_WRITE        ; Asynchronous file write
+AWAIT              ; Wait for async operation completion
+STREAM_CREATE      ; Create data stream
+STREAM_READ        ; Read from data stream
+STREAM_WRITE       ; Write to data stream
+STREAM_CLOSE       ; Close data stream
+JSON_PARSE         ; Parse JSON string to object
+JSON_STRINGIFY     ; Convert value to JSON string
+CSV_PARSE          ; Parse CSV data to list
+CSV_WRITE          ; Convert list to CSV format
+COMPRESS           ; Compress data
+DECOMPRESS         ; Decompress data
+ENCRYPT            ; Encrypt data with key
+DECRYPT            ; Decrypt data with key
+HASH               ; Generate hash of data
+DB_CONNECT         ; Connect to database
+DB_QUERY           ; Execute database query
+DB_EXEC            ; Execute database command
 HALT               ; Stop execution
 ```
 
@@ -634,6 +682,16 @@ The `examples/` directory contains comprehensive test programs:
 - **`advanced_optimization_test.ttvm`** - Advanced optimization features test
 - **`safe_advanced_optimization_test.ttvm`** - Safe advanced optimization demonstration
 - **`complete_optimization_showcase.ttvm`** - Complete demonstration of all 8 optimization passes
+- **`io_comprehensive_test.ttvm`** - Comprehensive test of all new I/O operations
+- **`io_interactive_test.ttvm`** - Interactive I/O demonstration (stdin/stdout)
+- **`io_simple_test.ttvm`** - Simple I/O test for basic file operations
+- **`stdlib_enhanced_io_test.ttvm`** - Enhanced I/O standard library demonstration
+- **`network_simple_test.ttvm`** - Basic network operations test
+- **`network_tcp_test.ttvm`** - TCP socket operations demonstration
+- **`network_udp_test.ttvm`** - UDP socket operations demonstration
+- **`stdlib_network_test.ttvm`** - Network standard library demonstration
+- **`advanced_io_test.ttvm`** - Advanced I/O features comprehensive test
+- **`stdlib_advanced_test.ttvm`** - Advanced features standard library demonstration
 
 ## Architecture
 
@@ -657,6 +715,10 @@ enum Value {
     Null,
     List(Vec<Value>),
     Object(HashMap<String, Value>),
+    Bytes(Vec<u8>),
+    Connection(String),
+    Stream(String),
+    Future(String),
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -673,7 +735,7 @@ Comprehensive error types with detailed messages:
 
 | **Feature Category** | **Capabilities** | **Status** |
 |---|---|---|
-| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Function, Closure |  Complete |
+| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Bytes, Connection, Stream, Future, Function, Closure |  Complete |
 | **Arithmetic** | Full integer/float arithmetic with type coercion |  Complete |
 | **Control Flow** | Jumps, conditionals, function calls, returns |  Complete |
 | **Functions** | First-class functions, parameters, dynamic dispatch |  Complete |
@@ -682,7 +744,7 @@ Comprehensive error types with detailed messages:
 | **Modules** | Import/export, circular dependency detection |  Complete |
 | **Exceptions** | Structured try/catch/throw with stack unwinding |  Complete |
 | **Debugging** | Step-by-step tracing, breakpoints, performance metrics |  Complete |
-| **I/O** | File operations, printing, string manipulation |  Complete |
+| **I/O** | File operations, stdin/stdout, environment access, process execution, time operations, network I/O, async operations |  Complete |
 | **Memory** | Automatic management, efficient stack allocation |  Complete |
 | **Standard Library** | Math, string, list, I/O, and conversion utilities |  Complete |
 

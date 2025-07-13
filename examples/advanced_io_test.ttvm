@@ -1,0 +1,192 @@
+; TinyTotVM Advanced I/O Features Test
+; Tests async operations, streaming, data formats, crypto, and database operations
+
+PUSH_STR "=== Advanced I/O Features Test ==="
+PRINT
+
+; Test 1: Async I/O operations
+PUSH_STR "--- Async I/O Operations ---"
+PRINT
+
+; Create a test file for async operations
+PUSH_STR "Hello Async World!"
+PUSH_STR "/tmp/async_test.txt"
+WRITE_FILE
+
+; Async read
+PUSH_STR "/tmp/async_test.txt"
+ASYNC_READ
+STORE async_future
+
+PUSH_STR "Async read future created:"
+PRINT
+LOAD async_future
+PRINT
+
+PUSH_STR "Awaiting async read result:"
+PRINT
+LOAD async_future
+AWAIT
+PRINT
+
+; Async write
+PUSH_STR "Async write content"
+PUSH_STR "/tmp/async_write_test.txt"
+ASYNC_WRITE
+STORE async_write_future
+
+PUSH_STR "Async write future created:"
+PRINT
+LOAD async_write_future
+PRINT
+
+PUSH_STR "Awaiting async write result:"
+PRINT
+LOAD async_write_future
+AWAIT
+PRINT
+
+; Test 2: Streaming operations
+PUSH_STR "--- Streaming Operations ---"
+PRINT
+
+PUSH_STR "memory"
+STREAM_CREATE
+STORE data_stream
+
+PUSH_STR "Stream created:"
+PRINT
+LOAD data_stream
+PRINT
+
+LOAD data_stream
+PUSH_STR "Hello streaming world!"
+STREAM_WRITE
+PRINT
+
+LOAD data_stream
+PUSH_INT 50
+STREAM_READ
+PRINT
+
+LOAD data_stream
+STREAM_CLOSE
+PRINT
+
+; Test 3: Data format operations
+PUSH_STR "--- Data Format Operations ---"
+PRINT
+
+; JSON operations
+PUSH_STR "{\"name\":\"Alice\",\"age\":25}"
+JSON_PARSE
+STORE parsed_json
+
+PUSH_STR "Parsed JSON:"
+PRINT
+LOAD parsed_json
+PRINT
+
+PUSH_STR "JSON stringified:"
+PRINT
+LOAD parsed_json
+JSON_STRINGIFY
+PRINT
+
+; CSV operations
+PUSH_STR "name,age,city\nAlice,25,Boston\nBob,30,Seattle"
+CSV_PARSE
+STORE parsed_csv
+
+PUSH_STR "Parsed CSV:"
+PRINT
+LOAD parsed_csv
+PRINT
+
+PUSH_STR "CSV written:"
+PRINT
+LOAD parsed_csv
+CSV_WRITE
+PRINT
+
+; Test 4: Compression operations
+PUSH_STR "--- Compression Operations ---"
+PRINT
+
+PUSH_STR "This is some data to compress for testing compression algorithms"
+COMPRESS
+STORE compressed_data
+
+PUSH_STR "Compressed data:"
+PRINT
+LOAD compressed_data
+PRINT
+
+PUSH_STR "Decompressed data:"
+PRINT
+LOAD compressed_data
+DECOMPRESS
+PRINT
+
+; Test 5: Cryptographic operations
+PUSH_STR "--- Cryptographic Operations ---"
+PRINT
+
+PUSH_STR "Secret message"
+PUSH_STR "encryption_key_123"
+ENCRYPT
+STORE encrypted_data
+
+PUSH_STR "Encrypted data:"
+PRINT
+LOAD encrypted_data
+PRINT
+
+LOAD encrypted_data
+PUSH_STR "encryption_key_123"
+DECRYPT
+PRINT
+
+; Hash operations
+PUSH_STR "Data to hash"
+HASH
+PRINT
+
+; Test 6: Database operations
+PUSH_STR "--- Database Operations ---"
+PRINT
+
+PUSH_STR "sqlite:///tmp/test.db"
+DB_CONNECT
+STORE db_connection
+
+PUSH_STR "Database connection:"
+PRINT
+LOAD db_connection
+PRINT
+
+PUSH_STR "Query result:"
+PRINT
+LOAD db_connection
+PUSH_STR "SELECT * FROM users"
+DB_QUERY
+PRINT
+
+PUSH_STR "Execution result:"
+PRINT
+LOAD db_connection
+PUSH_STR "INSERT INTO users (name) VALUES ('Alice')"
+DB_EXEC
+PRINT
+
+; Clean up test files
+PUSH_STR "/tmp/async_test.txt"
+DELETE_FILE
+
+PUSH_STR "/tmp/async_write_test.txt"
+DELETE_FILE
+
+PUSH_STR "=== Advanced I/O Features Test Complete ==="
+PRINT
+
+HALT
