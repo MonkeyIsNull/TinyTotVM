@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::fmt;
 use std::time::{Duration, Instant};
-use comfy_table::{Table, Cell, presets::UTF8_FULL, Color, Attribute};
+use comfy_table::{Table, Cell, presets::UTF8_FULL, modifiers::UTF8_SOLID_INNER_BORDERS, Color, Attribute};
 use colored::*;
 mod bytecode;
 mod compiler;
@@ -135,7 +135,8 @@ impl Profiler {
             OutputMode::PrettyTable => {
                 // Function Summary Table
                 let mut table = Table::new();
-                table.load_preset(UTF8_FULL);
+                table.load_preset(UTF8_FULL)
+                     .apply_modifier(UTF8_SOLID_INNER_BORDERS);
                 
                 // Set colored headers
                 table.set_header(vec![
@@ -182,7 +183,8 @@ impl Profiler {
                 
                 // Performance Summary Table
                 let mut summary_table = Table::new();
-                summary_table.load_preset(UTF8_FULL);
+                summary_table.load_preset(UTF8_FULL)
+                             .apply_modifier(UTF8_SOLID_INNER_BORDERS);
                 summary_table.set_header(vec![
                     Cell::new("Performance Metric").add_attribute(Attribute::Bold).fg(Color::Cyan),
                     Cell::new("Value").add_attribute(Attribute::Bold).fg(Color::White),
@@ -330,7 +332,8 @@ fn report_test_results(results: &[TestResult], config: &VMConfig) {
     match config.output_mode {
         OutputMode::PrettyTable => {
             let mut table = Table::new();
-            table.load_preset(UTF8_FULL);
+            table.load_preset(UTF8_FULL)
+                 .apply_modifier(UTF8_SOLID_INNER_BORDERS);
             table.set_header(vec!["Test", "Expected", "Actual", "Result"]);
 
             for r in results {
@@ -367,7 +370,8 @@ fn report_gc_stats(stats: &GcStats, config: &VMConfig) {
     match config.output_mode {
         OutputMode::PrettyTable => {
             let mut table = Table::new();
-            table.load_preset(UTF8_FULL);
+            table.load_preset(UTF8_FULL)
+                 .apply_modifier(UTF8_SOLID_INNER_BORDERS);
             table.set_header(vec![
                 Cell::new("GC Metric").add_attribute(Attribute::Bold).fg(Color::Cyan),
                 Cell::new("Value").add_attribute(Attribute::Bold).fg(Color::White),
@@ -3614,7 +3618,8 @@ fn run_comprehensive_tests() {
     
     // Create a table for the summary
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    table.load_preset(UTF8_FULL)
+         .apply_modifier(UTF8_SOLID_INNER_BORDERS);
     table.set_header(vec![
         Cell::new("Result").add_attribute(Attribute::Bold).fg(Color::Cyan),
         Cell::new("Count").add_attribute(Attribute::Bold).fg(Color::White),
