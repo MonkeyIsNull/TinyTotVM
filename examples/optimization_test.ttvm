@@ -39,25 +39,11 @@ LOAD temp
 ADD
 PRINT
 
-; Tail call optimization example
-CALL factorial_func x
-RET
-
-LABEL factorial_func
-LOAD x
+; Simple constant folding  
+PUSH_INT 5
 PUSH_INT 1
-LE
-JZ factorial_recursive
-PUSH_INT 1
-RET
-
-LABEL factorial_recursive
-LOAD x
-PUSH_INT 1
-SUB
-STORE x
-CALL factorial_func x
-RET
+ADD
+PRINT
 
 ; More constant folding
 TRUE

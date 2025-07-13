@@ -585,6 +585,7 @@ impl Optimizer {
         target
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> &OptimizationStats {
         &self.stats
     }
