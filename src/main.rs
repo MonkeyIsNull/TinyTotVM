@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::fmt;
+use std::time::{Duration, Instant};
 use comfy_table::{Table, Cell, presets::UTF8_FULL};
 mod bytecode;
 mod compiler;
@@ -22,6 +23,8 @@ pub struct VMConfig {
     pub debug_mode: bool,
     pub optimize_mode: bool,
     pub gc_type: String,
+    pub trace_enabled: bool,
+    pub profile_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +33,173 @@ pub struct TestResult {
     pub expected: String,
     pub actual: String,
     pub passed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionProfiler {
+    pub start_time: Instant,
+    pub instruction_count: usize,
+}
+
+impl FunctionProfiler {
+    pub fn new() -> Self {
+        FunctionProfiler {
+            start_time: Instant::now(),
+            instruction_count: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Profiler {
+    pub function_timings: HashMap<String, Duration>,
+    pub instruction_counts: HashMap<String, usize>,
+    pub call_counts: HashMap<String, usize>,
+    pub peak_stack_depth: usize,
+    pub total_allocations: usize,
+    pub peak_heap_size: usize,
+    pub current_function_stack: Vec<(String, FunctionProfiler)>,
+    pub call_depth: usize,
+}
+
+impl Profiler {
+    pub fn new() -> Self {
+        Profiler {
+            function_timings: HashMap::new(),
+            instruction_counts: HashMap::new(),
+            call_counts: HashMap::new(),
+            peak_stack_depth: 0,
+            total_allocations: 0,
+            peak_heap_size: 0,
+            current_function_stack: Vec::new(),
+            call_depth: 0,
+        }
+    }
+
+    pub fn start_function(&mut self, function_name: String) {
+        self.call_depth += 1;
+        let profiler = FunctionProfiler::new();
+        self.current_function_stack.push((function_name.clone(), profiler));
+        
+        // Update call count
+        *self.call_counts.entry(function_name).or_insert(0) += 1;
+    }
+
+    pub fn end_function(&mut self) -> Option<String> {
+        if let Some((function_name, profiler)) = self.current_function_stack.pop() {
+            self.call_depth = self.call_depth.saturating_sub(1);
+            
+            let elapsed = profiler.start_time.elapsed();
+            
+            // Add to total timing for this function
+            *self.function_timings.entry(function_name.clone()).or_insert(Duration::ZERO) += elapsed;
+            
+            // Add to total instruction count for this function
+            *self.instruction_counts.entry(function_name.clone()).or_insert(0) += profiler.instruction_count;
+            
+            Some(function_name)
+        } else {
+            None
+        }
+    }
+
+    pub fn record_instruction(&mut self) {
+        // Increment instruction count for current function
+        if let Some((_, profiler)) = self.current_function_stack.last_mut() {
+            profiler.instruction_count += 1;
+        }
+    }
+
+    pub fn update_stack_depth(&mut self, depth: usize) {
+        if depth > self.peak_stack_depth {
+            self.peak_stack_depth = depth;
+        }
+    }
+
+    pub fn record_allocation(&mut self, size: usize) {
+        self.total_allocations += 1;
+        if size > self.peak_heap_size {
+            self.peak_heap_size = size;
+        }
+    }
+
+    pub fn print_results(&self, config: &VMConfig) {
+        if self.function_timings.is_empty() && self.call_counts.is_empty() {
+            return;
+        }
+
+        println!("\n=== Profiling Results ===");
+        
+        match config.output_mode {
+            OutputMode::PrettyTable => {
+                // Function Summary Table
+                let mut table = Table::new();
+                table.load_preset(UTF8_FULL);
+                table.set_header(vec!["Function", "Calls", "Time (ms)", "Instructions", "Avg Time/Call (μs)"]);
+                
+                let mut functions: Vec<_> = self.function_timings.keys().collect();
+                functions.sort();
+                
+                for function_name in functions {
+                    let timing = self.function_timings.get(function_name).unwrap();
+                    let instructions = self.instruction_counts.get(function_name).unwrap_or(&0);
+                    let calls = self.call_counts.get(function_name).unwrap_or(&0);
+                    let avg_time_us = if *calls > 0 {
+                        timing.as_micros() as f64 / *calls as f64
+                    } else {
+                        0.0
+                    };
+                    
+                    table.add_row(vec![
+                        Cell::new(function_name),
+                        Cell::new(calls.to_string()),
+                        Cell::new(format!("{:.3}", timing.as_secs_f64() * 1000.0)),
+                        Cell::new(instructions.to_string()),
+                        Cell::new(format!("{:.1}", avg_time_us)),
+                    ]);
+                }
+                
+                println!("{}", table);
+                
+                // Performance Summary Table
+                let mut summary_table = Table::new();
+                summary_table.load_preset(UTF8_FULL);
+                summary_table.set_header(vec!["Metric", "Value"]);
+                
+                summary_table.add_row(vec![
+                    Cell::new("Peak Stack Depth"),
+                    Cell::new(format!("{} frames", self.peak_stack_depth)),
+                ]);
+                summary_table.add_row(vec![
+                    Cell::new("Total Allocations"),
+                    Cell::new(self.total_allocations.to_string()),
+                ]);
+                summary_table.add_row(vec![
+                    Cell::new("Peak Heap Size"),
+                    Cell::new(format!("{} bytes", self.peak_heap_size)),
+                ]);
+                
+                println!("{}", summary_table);
+            }
+            OutputMode::Plain => {
+                println!("Function Summary:");
+                let mut functions: Vec<_> = self.function_timings.keys().collect();
+                functions.sort();
+                
+                for function_name in functions {
+                    let timing = self.function_timings.get(function_name).unwrap();
+                    let instructions = self.instruction_counts.get(function_name).unwrap_or(&0);
+                    let calls = self.call_counts.get(function_name).unwrap_or(&0);
+                    println!("  {} - {} calls - {:.3} ms - {} instructions", 
+                        function_name, calls, timing.as_secs_f64() * 1000.0, instructions);
+                }
+                
+                println!("\nPeak Stack Depth: {} frames", self.peak_stack_depth);
+                println!("Total Allocations: {}", self.total_allocations);
+                println!("Peak Heap Size: {} bytes", self.peak_heap_size);
+            }
+        }
+    }
 }
 
 fn run_vm_tests(config: &VMConfig) {
@@ -624,6 +794,9 @@ struct VM {
     // Garbage Collection
     gc_engine: Box<dyn GcEngine>,           // Pluggable GC engine
     _gc_stats_enabled: bool,                 // Whether to show GC stats
+    // Profiling and Tracing
+    profiler: Option<Profiler>,             // Optional profiler for performance analysis
+    trace_enabled: bool,                    // Whether to enable tracing
 }
 
 impl VM {
@@ -637,6 +810,10 @@ impl VM {
     }
 
     fn new_with_gc(instructions: Vec<OpCode>, gc_type: &str, debug_mode: bool, gc_stats_enabled: bool) -> Self {
+        Self::new_with_config(instructions, gc_type, debug_mode, gc_stats_enabled, false, false)
+    }
+
+    fn new_with_config(instructions: Vec<OpCode>, gc_type: &str, debug_mode: bool, gc_stats_enabled: bool, trace_enabled: bool, profile_enabled: bool) -> Self {
         let gc_engine: Box<dyn GcEngine> = match gc_type {
             "no-gc" => Box::new(NoGc::new()),
             "mark-sweep" => Box::new(MarkSweepGc::new(debug_mode)),
@@ -660,6 +837,8 @@ impl VM {
             breakpoints: Vec::new(),
             gc_engine,
             _gc_stats_enabled: gc_stats_enabled,
+            profiler: if profile_enabled { Some(Profiler::new()) } else { None },
+            trace_enabled,
         }
     }
 
@@ -818,6 +997,23 @@ impl VM {
             self.instruction_count += 1;
             if self.stack.len() > self.max_stack_size {
                 self.max_stack_size = self.stack.len();
+            }
+
+            // Profiling support
+            if let Some(ref mut profiler) = self.profiler {
+                profiler.record_instruction();
+                profiler.update_stack_depth(self.stack.len());
+            }
+
+            // Tracing support
+            if self.trace_enabled {
+                let instruction = &self.instructions[self.ip];
+                let indent = if let Some(ref profiler) = self.profiler {
+                    "  ".repeat(profiler.call_depth)
+                } else {
+                    String::new()
+                };
+                println!("[trace] {}{:?} @ 0x{:04X}", indent, instruction, self.ip);
             }
 
             // Debugging support
@@ -982,6 +1178,25 @@ impl VM {
                 }
                 OpCode::Call{ addr, params } => {
                     self.check_stack_size(params.len(), "CALL")?;
+                    
+                    // Create function name for profiling/tracing
+                    let function_name = format!("fn@0x{:04X}", addr);
+                    
+                    // Function call tracing
+                    if self.trace_enabled {
+                        let indent = if let Some(ref profiler) = self.profiler {
+                            "  ".repeat(profiler.call_depth)
+                        } else {
+                            String::new()
+                        };
+                        println!("[trace] {}CALL {} with {} params", indent, function_name, params.len());
+                    }
+                    
+                    // Function profiling
+                    if let Some(ref mut profiler) = self.profiler {
+                        profiler.start_function(function_name);
+                    }
+                    
                     self.call_stack.push(self.ip + 1);
                     let mut frame = HashMap::new();
                     for name in params.iter().rev() {
@@ -992,6 +1207,21 @@ impl VM {
                     self.ip = *addr;
                 }
                 OpCode::Ret => {
+                    // Function return tracing and profiling
+                    if let Some(ref mut profiler) = self.profiler {
+                        if let Some(function_name) = profiler.end_function() {
+                            if self.trace_enabled {
+                                let indent = "  ".repeat(profiler.call_depth);
+                                let return_value = if !self.stack.is_empty() {
+                                    format!(" → {:?}", self.stack.last().unwrap())
+                                } else {
+                                    String::new()
+                                };
+                                println!("[trace] {}RETURN from {}{}", indent, function_name, return_value);
+                            }
+                        }
+                    }
+                    
                     self.pop_variable_frame()?;
                     self.ip = self.pop_call_stack()?;
                 }
@@ -1850,7 +2080,7 @@ impl VM {
                     match (timestamp, format_str) {
                         (Value::Int(ts), Value::Str(_format)) => {
                             // Simplified time formatting - just return ISO format
-                            use std::time::{UNIX_EPOCH, Duration};
+                            use std::time::UNIX_EPOCH;
                             let _system_time = UNIX_EPOCH + Duration::from_secs(ts as u64);
                             // For simplicity, just return the timestamp as string
                             // In a real implementation, we'd use chrono or similar for formatting
@@ -3207,6 +3437,7 @@ fn run_comprehensive_tests() {
         ("math_module.ttvm", "Math module"),
         ("program.ttvm", "Basic program"),
         ("showcase_lisp.ttvm", "Lisp showcase"),
+        ("simple_profiling_test.ttvm", "Simple profiling test"),
     ];
     
     let mut passed = 0;
@@ -3361,7 +3592,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] <program.ttvm|program.ttb>");
+        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] <program.ttvm|program.ttb>");
         eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
         eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
         eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
@@ -3370,6 +3601,7 @@ fn main() {
         eprintln!("GC Types: mark-sweep (default), no-gc");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
         eprintln!("Table Control: --no-table disables formatted output in favor of plain text");
+        eprintln!("Performance: --trace enables instruction tracing, --profile enables function profiling");
         std::process::exit(1);
     }
 
@@ -3380,6 +3612,8 @@ fn main() {
     let mut gc_stats = false;
     let mut run_tests = false;
     let mut no_table = false;
+    let mut trace_enabled = false;
+    let mut profile_enabled = false;
     let mut file_index = 1;
 
     // Check for flags
@@ -3419,6 +3653,14 @@ fn main() {
             }
             "--no-table" => {
                 no_table = true;
+                file_index += 1;
+            }
+            "--trace" => {
+                trace_enabled = true;
+                file_index += 1;
+            }
+            "--profile" => {
+                profile_enabled = true;
                 file_index += 1;
             }
             _ => {
@@ -3488,6 +3730,8 @@ fn main() {
         debug_mode,
         optimize_mode,
         gc_type: gc_type.to_string(),
+        trace_enabled,
+        profile_enabled,
     };
 
     // Run unit tests if requested (no program file needed)
@@ -3541,10 +3785,18 @@ fn main() {
         println!();
     }
 
-    let mut vm = VM::new_with_gc(program, gc_type, debug_mode || gc_debug, gc_stats);
+    
+    let mut vm = VM::new_with_config(program, &config.gc_type, config.debug_mode || config.gc_debug, config.gc_stats, config.trace_enabled, config.profile_enabled);
     if let Err(e) = vm.run() {
         eprintln!("VM runtime error: {}", e);
         std::process::exit(1);
+    }
+
+    // Output profiling results if enabled
+    if config.profile_enabled {
+        if let Some(profiler) = &vm.profiler {
+            profiler.print_results(&config);
+        }
     }
     
     if debug_mode {

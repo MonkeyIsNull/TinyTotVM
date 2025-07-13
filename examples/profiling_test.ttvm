@@ -1,0 +1,74 @@
+; Profiling and Tracing Test
+; Tests function calls, recursion, and performance metrics
+
+PUSH_STR "=== Profiling Test ===" 
+PRINT
+
+; Simple function test
+PUSH_INT 10
+PUSH_INT 5
+CALL add_numbers a b
+PRINT
+
+; Recursive function test
+PUSH_INT 5
+CALL factorial n
+PRINT
+
+; Math intensive function test
+PUSH_INT 1000
+CALL count_down num
+PRINT
+
+HALT
+
+; Function: add_numbers
+LABEL add_numbers
+LOAD a
+LOAD b
+ADD
+RET
+
+; Function: factorial
+LABEL factorial
+LOAD n
+PUSH_INT 1
+LE
+JZ factorial_continue
+
+PUSH_INT 1
+RET
+
+LABEL factorial_continue
+PUSH_INT 1
+STORE result
+LOAD n
+STORE temp
+LOAD temp
+PUSH_INT 1
+SUB
+CALL factorial n
+LOAD temp
+MUL
+RET
+
+; Function: count_down (iterative to create instruction load)
+LABEL count_down
+LOAD num
+STORE counter
+
+LABEL count_loop
+LOAD counter
+PUSH_INT 0
+LE
+JZ count_continue
+
+LOAD counter
+RET
+
+LABEL count_continue
+LOAD counter
+PUSH_INT 1
+SUB
+STORE counter
+JMP count_loop
