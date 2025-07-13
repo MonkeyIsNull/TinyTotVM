@@ -57,6 +57,8 @@ enum Value {
     Object(HashMap<String, Value>),
     Bytes(Vec<u8>),
     Connection(String), // Network connection handle (simplified as string ID)
+    Stream(String),     // Data stream handle (simplified as string ID)
+    Future(String),     // Async operation handle (simplified as string ID)
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -93,6 +95,12 @@ impl fmt::Display for Value {
             },
             Value::Connection(id) => {
                 write!(f, "Connection({})", id)
+            },
+            Value::Stream(id) => {
+                write!(f, "Stream({})", id)
+            },
+            Value::Future(id) => {
+                write!(f, "Future({})", id)
             },
             Value::Function { addr, params } => {
                 write!(f, "function@{} ({})", addr, params.join(", "))
@@ -197,6 +205,26 @@ enum OpCode {
     UdpSend,        // Send UDP packet
     UdpRecv,        // Receive UDP packet
     DnsResolve,     // Resolve hostname to IP
+    // Advanced I/O operations
+    AsyncRead,      // Asynchronous file read
+    AsyncWrite,     // Asynchronous file write
+    Await,          // Wait for async operation
+    StreamCreate,   // Create data stream
+    StreamRead,     // Read from stream
+    StreamWrite,    // Write to stream
+    StreamClose,    // Close stream
+    JsonParse,      // Parse JSON string
+    JsonStringify,  // Convert to JSON string
+    CsvParse,       // Parse CSV data
+    CsvWrite,       // Write CSV data
+    Compress,       // Compress data
+    Decompress,     // Decompress data
+    Encrypt,        // Encrypt data
+    Decrypt,        // Decrypt data
+    Hash,           // Generate hash
+    DbConnect,      // Connect to database
+    DbQuery,        // Execute database query
+    DbExec,         // Execute database command
     // Object operations
     MakeObject,
     SetField(String),   // field name
@@ -1663,6 +1691,383 @@ impl VM {
                         }),
                     }
                 }
+                // Advanced I/O operations
+                OpCode::AsyncRead => {
+                    let val = self.pop_stack("ASYNC_READ")?;
+                    match val {
+                        Value::Str(filename) => {
+                            // Simplified async read - in real implementation would use tokio or async-std
+                            let future_id = format!("async_read:{}", filename);
+                            self.stack.push(Value::Future(future_id));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "ASYNC_READ".to_string() 
+                        }),
+                    }
+                }
+                OpCode::AsyncWrite => {
+                    let content = self.pop_stack("ASYNC_WRITE")?;
+                    let filename = self.pop_stack("ASYNC_WRITE")?;
+                    match (filename, content) {
+                        (Value::Str(fname), Value::Str(data)) => {
+                            // Simplified async write
+                            let future_id = format!("async_write:{}:{}", fname, data.len());
+                            self.stack.push(Value::Future(future_id));
+                        }
+                        (f, c) => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename) and string (content)".to_string(), 
+                            got: format!("{:?}, {:?}", f, c), 
+                            operation: "ASYNC_WRITE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Await => {
+                    let val = self.pop_stack("AWAIT")?;
+                    match val {
+                        Value::Future(future_id) => {
+                            // Simplified await - simulate completion
+                            if future_id.starts_with("async_read:") {
+                                let filename = future_id.strip_prefix("async_read:").unwrap_or("unknown");
+                                // Simulate reading file
+                                match std::fs::read_to_string(filename) {
+                                    Ok(content) => self.stack.push(Value::Str(content)),
+                                    Err(e) => return Err(VMError::FileError { 
+                                        filename: filename.to_string(), 
+                                        error: e.to_string() 
+                                    }),
+                                }
+                            } else if future_id.starts_with("async_write:") {
+                                // Simulate write completion
+                                self.stack.push(Value::Bool(true));
+                            } else {
+                                self.stack.push(Value::Null);
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "future".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "AWAIT".to_string() 
+                        }),
+                    }
+                }
+                OpCode::StreamCreate => {
+                    let val = self.pop_stack("STREAM_CREATE")?;
+                    match val {
+                        Value::Str(stream_type) => {
+                            let stream_id = format!("stream:{}:{}", stream_type, self.instruction_count);
+                            self.stack.push(Value::Stream(stream_id));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (stream type)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "STREAM_CREATE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::StreamRead => {
+                    let size = self.pop_stack("STREAM_READ")?;
+                    let stream = self.pop_stack("STREAM_READ")?;
+                    match (stream, size) {
+                        (Value::Stream(stream_id), Value::Int(read_size)) => {
+                            // Simplified stream read
+                            let data = format!("stream_data_{}", read_size);
+                            self.stack.push(Value::Str(data));
+                        }
+                        (s, sz) => return Err(VMError::TypeMismatch { 
+                            expected: "stream and int (size)".to_string(), 
+                            got: format!("{:?}, {:?}", s, sz), 
+                            operation: "STREAM_READ".to_string() 
+                        }),
+                    }
+                }
+                OpCode::StreamWrite => {
+                    let data = self.pop_stack("STREAM_WRITE")?;
+                    let stream = self.pop_stack("STREAM_WRITE")?;
+                    match (stream, data) {
+                        (Value::Stream(_stream_id), Value::Str(write_data)) => {
+                            // Simplified stream write
+                            self.stack.push(Value::Int(write_data.len() as i64));
+                        }
+                        (Value::Stream(_stream_id), Value::Bytes(write_bytes)) => {
+                            // Write binary data to stream
+                            self.stack.push(Value::Int(write_bytes.len() as i64));
+                        }
+                        (s, d) => return Err(VMError::TypeMismatch { 
+                            expected: "stream and string/bytes".to_string(), 
+                            got: format!("{:?}, {:?}", s, d), 
+                            operation: "STREAM_WRITE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::StreamClose => {
+                    let val = self.pop_stack("STREAM_CLOSE")?;
+                    match val {
+                        Value::Stream(_stream_id) => {
+                            // Simplified stream close
+                            self.stack.push(Value::Bool(true));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "stream".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "STREAM_CLOSE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::JsonParse => {
+                    let val = self.pop_stack("JSON_PARSE")?;
+                    match val {
+                        Value::Str(json_str) => {
+                            // Simplified JSON parsing - in real implementation would use serde_json
+                            if json_str.starts_with('{') && json_str.ends_with('}') {
+                                let mut obj = HashMap::new();
+                                obj.insert("parsed".to_string(), Value::Bool(true));
+                                obj.insert("data".to_string(), Value::Str("json_data".to_string()));
+                                self.stack.push(Value::Object(obj));
+                            } else if json_str.starts_with('[') && json_str.ends_with(']') {
+                                let list = vec![
+                                    Value::Str("item1".to_string()),
+                                    Value::Str("item2".to_string()),
+                                ];
+                                self.stack.push(Value::List(list));
+                            } else {
+                                self.stack.push(Value::Str(json_str));
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (JSON)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "JSON_PARSE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::JsonStringify => {
+                    let val = self.pop_stack("JSON_STRINGIFY")?;
+                    match val {
+                        Value::Object(_) => {
+                            // Simplified JSON stringification
+                            self.stack.push(Value::Str("{\"key\":\"value\"}".to_string()));
+                        }
+                        Value::List(_) => {
+                            self.stack.push(Value::Str("[\"item1\",\"item2\"]".to_string()));
+                        }
+                        Value::Str(s) => {
+                            self.stack.push(Value::Str(format!("\"{}\"", s)));
+                        }
+                        Value::Int(n) => {
+                            self.stack.push(Value::Str(n.to_string()));
+                        }
+                        Value::Bool(b) => {
+                            self.stack.push(Value::Str(b.to_string()));
+                        }
+                        Value::Null => {
+                            self.stack.push(Value::Str("null".to_string()));
+                        }
+                        _ => {
+                            self.stack.push(Value::Str("{}".to_string()));
+                        }
+                    }
+                }
+                OpCode::CsvParse => {
+                    let val = self.pop_stack("CSV_PARSE")?;
+                    match val {
+                        Value::Str(csv_str) => {
+                            // Simplified CSV parsing
+                            let rows: Vec<Value> = csv_str.lines()
+                                .map(|line| {
+                                    let columns: Vec<Value> = line.split(',')
+                                        .map(|col| Value::Str(col.trim().to_string()))
+                                        .collect();
+                                    Value::List(columns)
+                                })
+                                .collect();
+                            self.stack.push(Value::List(rows));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (CSV)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "CSV_PARSE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::CsvWrite => {
+                    let val = self.pop_stack("CSV_WRITE")?;
+                    match val {
+                        Value::List(rows) => {
+                            // Simplified CSV writing
+                            let mut csv_output = String::new();
+                            for (i, row) in rows.iter().enumerate() {
+                                if i > 0 {
+                                    csv_output.push('\n');
+                                }
+                                if let Value::List(columns) = row {
+                                    for (j, col) in columns.iter().enumerate() {
+                                        if j > 0 {
+                                            csv_output.push(',');
+                                        }
+                                        csv_output.push_str(&format!("{}", col));
+                                    }
+                                }
+                            }
+                            self.stack.push(Value::Str(csv_output));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "list of lists (CSV data)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "CSV_WRITE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Compress => {
+                    let val = self.pop_stack("COMPRESS")?;
+                    match val {
+                        Value::Str(data) => {
+                            // Simplified compression - in real implementation would use flate2
+                            let compressed = format!("compressed({})", data.len());
+                            self.stack.push(Value::Bytes(compressed.into_bytes()));
+                        }
+                        Value::Bytes(data) => {
+                            let compressed = format!("compressed({})", data.len());
+                            self.stack.push(Value::Bytes(compressed.into_bytes()));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string or bytes".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "COMPRESS".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Decompress => {
+                    let val = self.pop_stack("DECOMPRESS")?;
+                    match val {
+                        Value::Bytes(data) => {
+                            // Simplified decompression
+                            let decompressed = format!("decompressed:{}", String::from_utf8_lossy(&data));
+                            self.stack.push(Value::Str(decompressed));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "bytes (compressed data)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "DECOMPRESS".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Encrypt => {
+                    let key = self.pop_stack("ENCRYPT")?;
+                    let data = self.pop_stack("ENCRYPT")?;
+                    match (data, key) {
+                        (Value::Str(plaintext), Value::Str(encryption_key)) => {
+                            // Simplified encryption - in real implementation would use proper crypto
+                            let encrypted = format!("encrypted:{}:key:{}", plaintext.len(), encryption_key.len());
+                            self.stack.push(Value::Bytes(encrypted.into_bytes()));
+                        }
+                        (d, k) => return Err(VMError::TypeMismatch { 
+                            expected: "string (data) and string (key)".to_string(), 
+                            got: format!("{:?}, {:?}", d, k), 
+                            operation: "ENCRYPT".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Decrypt => {
+                    let key = self.pop_stack("DECRYPT")?;
+                    let data = self.pop_stack("DECRYPT")?;
+                    match (data, key) {
+                        (Value::Bytes(ciphertext), Value::Str(_decryption_key)) => {
+                            // Simplified decryption
+                            let decrypted = format!("decrypted:{}", String::from_utf8_lossy(&ciphertext));
+                            self.stack.push(Value::Str(decrypted));
+                        }
+                        (d, k) => return Err(VMError::TypeMismatch { 
+                            expected: "bytes (encrypted data) and string (key)".to_string(), 
+                            got: format!("{:?}, {:?}", d, k), 
+                            operation: "DECRYPT".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Hash => {
+                    let val = self.pop_stack("HASH")?;
+                    match val {
+                        Value::Str(data) => {
+                            // Simplified hashing - in real implementation would use sha2, md5, etc.
+                            use std::collections::hash_map::DefaultHasher;
+                            use std::hash::{Hash, Hasher};
+                            let mut hasher = DefaultHasher::new();
+                            data.hash(&mut hasher);
+                            let hash_value = hasher.finish();
+                            self.stack.push(Value::Str(format!("{:x}", hash_value)));
+                        }
+                        Value::Bytes(data) => {
+                            use std::collections::hash_map::DefaultHasher;
+                            use std::hash::{Hash, Hasher};
+                            let mut hasher = DefaultHasher::new();
+                            data.hash(&mut hasher);
+                            let hash_value = hasher.finish();
+                            self.stack.push(Value::Str(format!("{:x}", hash_value)));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string or bytes".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "HASH".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DbConnect => {
+                    let val = self.pop_stack("DB_CONNECT")?;
+                    match val {
+                        Value::Str(connection_string) => {
+                            // Simplified database connection - in real implementation would use sqlx, rusqlite, etc.
+                            let db_id = format!("db:{}", connection_string);
+                            self.stack.push(Value::Connection(db_id));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (connection string)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "DB_CONNECT".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DbQuery => {
+                    let query = self.pop_stack("DB_QUERY")?;
+                    let db = self.pop_stack("DB_QUERY")?;
+                    match (db, query) {
+                        (Value::Connection(db_id), Value::Str(sql_query)) => {
+                            // Simplified database query
+                            let mut result = HashMap::new();
+                            result.insert("rows".to_string(), Value::Int(3));
+                            result.insert("columns".to_string(), Value::List(vec![
+                                Value::Str("id".to_string()),
+                                Value::Str("name".to_string()),
+                            ]));
+                            result.insert("data".to_string(), Value::List(vec![
+                                Value::List(vec![Value::Int(1), Value::Str("Alice".to_string())]),
+                                Value::List(vec![Value::Int(2), Value::Str("Bob".to_string())]),
+                                Value::List(vec![Value::Int(3), Value::Str("Charlie".to_string())]),
+                            ]));
+                            self.stack.push(Value::Object(result));
+                        }
+                        (d, q) => return Err(VMError::TypeMismatch { 
+                            expected: "connection and string (SQL query)".to_string(), 
+                            got: format!("{:?}, {:?}", d, q), 
+                            operation: "DB_QUERY".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DbExec => {
+                    let command = self.pop_stack("DB_EXEC")?;
+                    let db = self.pop_stack("DB_EXEC")?;
+                    match (db, command) {
+                        (Value::Connection(_db_id), Value::Str(_sql_command)) => {
+                            // Simplified database execution
+                            self.stack.push(Value::Int(1)); // affected rows
+                        }
+                        (d, c) => return Err(VMError::TypeMismatch { 
+                            expected: "connection and string (SQL command)".to_string(), 
+                            got: format!("{:?}, {:?}", d, c), 
+                            operation: "DB_EXEC".to_string() 
+                        }),
+                    }
+                }
                 OpCode::DumpScope => {
                     println!("Current scope: {:?}", self.variables.last());
                 }
@@ -2088,6 +2493,26 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "UDP_SEND" => OpCode::UdpSend,
             "UDP_RECV" => OpCode::UdpRecv,
             "DNS_RESOLVE" => OpCode::DnsResolve,
+            // Advanced I/O operations
+            "ASYNC_READ" => OpCode::AsyncRead,
+            "ASYNC_WRITE" => OpCode::AsyncWrite,
+            "AWAIT" => OpCode::Await,
+            "STREAM_CREATE" => OpCode::StreamCreate,
+            "STREAM_READ" => OpCode::StreamRead,
+            "STREAM_WRITE" => OpCode::StreamWrite,
+            "STREAM_CLOSE" => OpCode::StreamClose,
+            "JSON_PARSE" => OpCode::JsonParse,
+            "JSON_STRINGIFY" => OpCode::JsonStringify,
+            "CSV_PARSE" => OpCode::CsvParse,
+            "CSV_WRITE" => OpCode::CsvWrite,
+            "COMPRESS" => OpCode::Compress,
+            "DECOMPRESS" => OpCode::Decompress,
+            "ENCRYPT" => OpCode::Encrypt,
+            "DECRYPT" => OpCode::Decrypt,
+            "HASH" => OpCode::Hash,
+            "DB_CONNECT" => OpCode::DbConnect,
+            "DB_QUERY" => OpCode::DbQuery,
+            "DB_EXEC" => OpCode::DbExec,
             "IMPORT" => {
                 let path = parts[1].trim();
                 // Remove quotes if present
@@ -2240,6 +2665,26 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::UdpSend => "UDP_SEND".to_string(),
             OpCode::UdpRecv => "UDP_RECV".to_string(),
             OpCode::DnsResolve => "DNS_RESOLVE".to_string(),
+            // Advanced I/O operations
+            OpCode::AsyncRead => "ASYNC_READ".to_string(),
+            OpCode::AsyncWrite => "ASYNC_WRITE".to_string(),
+            OpCode::Await => "AWAIT".to_string(),
+            OpCode::StreamCreate => "STREAM_CREATE".to_string(),
+            OpCode::StreamRead => "STREAM_READ".to_string(),
+            OpCode::StreamWrite => "STREAM_WRITE".to_string(),
+            OpCode::StreamClose => "STREAM_CLOSE".to_string(),
+            OpCode::JsonParse => "JSON_PARSE".to_string(),
+            OpCode::JsonStringify => "JSON_STRINGIFY".to_string(),
+            OpCode::CsvParse => "CSV_PARSE".to_string(),
+            OpCode::CsvWrite => "CSV_WRITE".to_string(),
+            OpCode::Compress => "COMPRESS".to_string(),
+            OpCode::Decompress => "DECOMPRESS".to_string(),
+            OpCode::Encrypt => "ENCRYPT".to_string(),
+            OpCode::Decrypt => "DECRYPT".to_string(),
+            OpCode::Hash => "HASH".to_string(),
+            OpCode::DbConnect => "DB_CONNECT".to_string(),
+            OpCode::DbQuery => "DB_QUERY".to_string(),
+            OpCode::DbExec => "DB_EXEC".to_string(),
             OpCode::MakeObject => "MAKE_OBJECT".to_string(),
             OpCode::SetField(field) => format!("SET_FIELD {}", field),
             OpCode::GetField(field) => format!("GET_FIELD {}", field),

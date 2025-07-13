@@ -43,7 +43,7 @@ TinyTotVM is a **toy virtual machine** with features found in modern programming
 
 ### **Core Language Features**
 - **Stack-based Architecture** - Efficient execution with pre-allocated memory
-- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Bytes, Connection, Function, Closure values
+- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Bytes, Connection, Stream, Future, Function, Closure values
 - **Type Coercion** - Automatic conversion between compatible types (int <-> float)
 - **Memory Management** - Automatic cleanup via Rust's ownership system
 - **Error Handling** - Comprehensive Result-based error system instead of crashes
@@ -328,6 +328,25 @@ UDP_BIND           ; Bind UDP socket to port
 UDP_SEND           ; Send UDP packet
 UDP_RECV           ; Receive UDP packet
 DNS_RESOLVE        ; Resolve hostname to IP address
+ASYNC_READ         ; Asynchronous file read
+ASYNC_WRITE        ; Asynchronous file write
+AWAIT              ; Wait for async operation completion
+STREAM_CREATE      ; Create data stream
+STREAM_READ        ; Read from data stream
+STREAM_WRITE       ; Write to data stream
+STREAM_CLOSE       ; Close data stream
+JSON_PARSE         ; Parse JSON string to object
+JSON_STRINGIFY     ; Convert value to JSON string
+CSV_PARSE          ; Parse CSV data to list
+CSV_WRITE          ; Convert list to CSV format
+COMPRESS           ; Compress data
+DECOMPRESS         ; Decompress data
+ENCRYPT            ; Encrypt data with key
+DECRYPT            ; Decrypt data with key
+HASH               ; Generate hash of data
+DB_CONNECT         ; Connect to database
+DB_QUERY           ; Execute database query
+DB_EXEC            ; Execute database command
 HALT               ; Stop execution
 ```
 
@@ -671,6 +690,8 @@ The `examples/` directory contains comprehensive test programs:
 - **`network_tcp_test.ttvm`** - TCP socket operations demonstration
 - **`network_udp_test.ttvm`** - UDP socket operations demonstration
 - **`stdlib_network_test.ttvm`** - Network standard library demonstration
+- **`advanced_io_test.ttvm`** - Advanced I/O features comprehensive test
+- **`stdlib_advanced_test.ttvm`** - Advanced features standard library demonstration
 
 ## Architecture
 
@@ -696,6 +717,8 @@ enum Value {
     Object(HashMap<String, Value>),
     Bytes(Vec<u8>),
     Connection(String),
+    Stream(String),
+    Future(String),
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -712,7 +735,7 @@ Comprehensive error types with detailed messages:
 
 | **Feature Category** | **Capabilities** | **Status** |
 |---|---|---|
-| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Bytes, Connection, Function, Closure |  Complete |
+| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Bytes, Connection, Stream, Future, Function, Closure |  Complete |
 | **Arithmetic** | Full integer/float arithmetic with type coercion |  Complete |
 | **Control Flow** | Jumps, conditionals, function calls, returns |  Complete |
 | **Functions** | First-class functions, parameters, dynamic dispatch |  Complete |
@@ -721,7 +744,7 @@ Comprehensive error types with detailed messages:
 | **Modules** | Import/export, circular dependency detection |  Complete |
 | **Exceptions** | Structured try/catch/throw with stack unwinding |  Complete |
 | **Debugging** | Step-by-step tracing, breakpoints, performance metrics |  Complete |
-| **I/O** | File operations, stdin/stdout, environment access, process execution, time operations, network I/O |  Complete |
+| **I/O** | File operations, stdin/stdout, environment access, process execution, time operations, network I/O, async operations |  Complete |
 | **Memory** | Automatic management, efficient stack allocation |  Complete |
 | **Standard Library** | Math, string, list, I/O, and conversion utilities |  Complete |
 

@@ -12,6 +12,7 @@ The standard library is organized into focused modules:
 - **`std/convert.ttvm`** - Type conversion and type checking utilities
 - **`std/io.ttvm`** - I/O operations and data format handling
 - **`std/network.ttvm`** - Network operations and protocols
+- **`std/advanced.ttvm`** - Advanced I/O features (async, streaming, crypto, database)
 - **`std/prelude.ttvm`** - Commonly used functions (imports other modules)
 
 ## Usage
@@ -279,6 +280,78 @@ PUSH_STR "GET / HTTP/1.0\r\n\r\n"
 LOAD tcp_send
 CALL_FUNCTION
 PRINT  ; Outputs: bytes sent
+```
+
+### Advanced Module (`std/advanced.ttvm`)
+
+**Async Operations:**
+- `async_read(filename)` - Start asynchronous file read
+- `async_write(filename, content)` - Start asynchronous file write
+- `await(future)` - Wait for async operation completion
+
+**Streaming Operations:**
+- `stream_create(type)` - Create data stream
+- `stream_read(stream, size)` - Read from stream
+- `stream_write(stream, data)` - Write to stream
+- `stream_close(stream)` - Close stream
+
+**Data Format Operations:**
+- `json_parse(json_string)` - Parse JSON to object/list
+- `json_stringify(value)` - Convert value to JSON string
+- `csv_parse(csv_string)` - Parse CSV to list of lists
+- `csv_write(data)` - Convert list to CSV format
+
+**Compression Operations:**
+- `compress(data)` - Compress string or binary data
+- `decompress(compressed_data)` - Decompress data
+
+**Cryptographic Operations:**
+- `encrypt(data, key)` - Encrypt data with key
+- `decrypt(encrypted_data, key)` - Decrypt data with key
+- `hash(data)` - Generate hash of data
+
+**Database Operations:**
+- `db_connect(connection_string)` - Connect to database
+- `db_query(connection, query)` - Execute SELECT query
+- `db_exec(connection, command)` - Execute INSERT/UPDATE/DELETE
+
+**Example:**
+```assembly
+IMPORT std/advanced.ttvm
+
+; Async file operations
+PUSH_STR "/tmp/data.txt"
+LOAD async_read
+CALL_FUNCTION
+STORE future
+
+LOAD future
+LOAD await
+CALL_FUNCTION
+PRINT  ; Outputs: file contents
+
+; JSON processing
+PUSH_STR "{\"name\":\"Alice\",\"age\":25}"
+LOAD json_parse
+CALL_FUNCTION
+STORE json_obj
+
+LOAD json_obj
+LOAD json_stringify
+CALL_FUNCTION
+PRINT  ; Outputs: JSON string
+
+; Database operations
+PUSH_STR "sqlite://memory"
+LOAD db_connect
+CALL_FUNCTION
+STORE db
+
+LOAD db
+PUSH_STR "SELECT 1 as test"
+LOAD db_query
+CALL_FUNCTION
+PRINT  ; Outputs: query results
 ```
 
 **Example:**

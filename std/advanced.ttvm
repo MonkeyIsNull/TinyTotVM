@@ -1,0 +1,198 @@
+; TinyTotVM Standard Library - Advanced I/O Module
+; Provides async operations, streaming, data formats, crypto, and database functions
+
+JMP main
+
+; Async I/O functions
+LABEL async_read_func
+LOAD filename
+ASYNC_READ
+RET
+
+LABEL async_write_func
+LOAD filename
+LOAD content
+ASYNC_WRITE
+RET
+
+LABEL await_func
+LOAD future
+AWAIT
+RET
+
+; Streaming functions
+LABEL stream_create_func
+LOAD stream_type
+STREAM_CREATE
+RET
+
+LABEL stream_read_func
+LOAD stream
+LOAD size
+STREAM_READ
+RET
+
+LABEL stream_write_func
+LOAD stream
+LOAD data
+STREAM_WRITE
+RET
+
+LABEL stream_close_func
+LOAD stream
+STREAM_CLOSE
+RET
+
+; Data format functions
+LABEL json_parse_func
+LOAD json_string
+JSON_PARSE
+RET
+
+LABEL json_stringify_func
+LOAD value
+JSON_STRINGIFY
+RET
+
+LABEL csv_parse_func
+LOAD csv_string
+CSV_PARSE
+RET
+
+LABEL csv_write_func
+LOAD data
+CSV_WRITE
+RET
+
+; Compression functions
+LABEL compress_func
+LOAD data
+COMPRESS
+RET
+
+LABEL decompress_func
+LOAD compressed_data
+DECOMPRESS
+RET
+
+; Cryptographic functions
+LABEL encrypt_func
+LOAD data
+LOAD key
+ENCRYPT
+RET
+
+LABEL decrypt_func
+LOAD encrypted_data
+LOAD key
+DECRYPT
+RET
+
+LABEL hash_func
+LOAD data
+HASH
+RET
+
+; Database functions
+LABEL db_connect_func
+LOAD connection_string
+DB_CONNECT
+RET
+
+LABEL db_query_func
+LOAD connection
+LOAD query
+DB_QUERY
+RET
+
+LABEL db_exec_func
+LOAD connection
+LOAD command
+DB_EXEC
+RET
+
+LABEL main
+
+; Export async I/O functions
+MAKE_FUNCTION async_read_func filename
+STORE async_read
+EXPORT async_read
+
+MAKE_FUNCTION async_write_func filename content
+STORE async_write
+EXPORT async_write
+
+MAKE_FUNCTION await_func future
+STORE await
+EXPORT await
+
+; Export streaming functions
+MAKE_FUNCTION stream_create_func stream_type
+STORE stream_create
+EXPORT stream_create
+
+MAKE_FUNCTION stream_read_func stream size
+STORE stream_read
+EXPORT stream_read
+
+MAKE_FUNCTION stream_write_func stream data
+STORE stream_write
+EXPORT stream_write
+
+MAKE_FUNCTION stream_close_func stream
+STORE stream_close
+EXPORT stream_close
+
+; Export data format functions
+MAKE_FUNCTION json_parse_func json_string
+STORE json_parse
+EXPORT json_parse
+
+MAKE_FUNCTION json_stringify_func value
+STORE json_stringify
+EXPORT json_stringify
+
+MAKE_FUNCTION csv_parse_func csv_string
+STORE csv_parse
+EXPORT csv_parse
+
+MAKE_FUNCTION csv_write_func data
+STORE csv_write
+EXPORT csv_write
+
+; Export compression functions
+MAKE_FUNCTION compress_func data
+STORE compress
+EXPORT compress
+
+MAKE_FUNCTION decompress_func compressed_data
+STORE decompress
+EXPORT decompress
+
+; Export cryptographic functions
+MAKE_FUNCTION encrypt_func data key
+STORE encrypt
+EXPORT encrypt
+
+MAKE_FUNCTION decrypt_func encrypted_data key
+STORE decrypt
+EXPORT decrypt
+
+MAKE_FUNCTION hash_func data
+STORE hash
+EXPORT hash
+
+; Export database functions
+MAKE_FUNCTION db_connect_func connection_string
+STORE db_connect
+EXPORT db_connect
+
+MAKE_FUNCTION db_query_func connection query
+STORE db_query
+EXPORT db_query
+
+MAKE_FUNCTION db_exec_func connection command
+STORE db_exec
+EXPORT db_exec
+
+HALT
