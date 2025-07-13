@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::fmt;
 use std::time::{Duration, Instant};
-use comfy_table::{Table, Cell, presets::UTF8_FULL};
+use comfy_table::{Table, Cell, presets::UTF8_FULL, Color, Attribute};
+use colored::*;
 mod bytecode;
 mod compiler;
 mod lisp_compiler;
@@ -128,14 +129,22 @@ impl Profiler {
             return;
         }
 
-        println!("\n=== Profiling Results ===");
+        println!("\n{}", "═══ Profiling Results ═══".bright_cyan().bold());
         
         match config.output_mode {
             OutputMode::PrettyTable => {
                 // Function Summary Table
                 let mut table = Table::new();
                 table.load_preset(UTF8_FULL);
-                table.set_header(vec!["Function", "Calls", "Time (ms)", "Instructions", "Avg Time/Call (μs)"]);
+                
+                // Set colored headers
+                table.set_header(vec![
+                    Cell::new("Function").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                    Cell::new("Calls").add_attribute(Attribute::Bold).fg(Color::Green),
+                    Cell::new("Time (ms)").add_attribute(Attribute::Bold).fg(Color::Yellow),
+                    Cell::new("Instructions").add_attribute(Attribute::Bold).fg(Color::Blue),
+                    Cell::new("Avg Time/Call (μs)").add_attribute(Attribute::Bold).fg(Color::Magenta),
+                ]);
                 
                 let mut functions: Vec<_> = self.function_timings.keys().collect();
                 functions.sort();
@@ -150,12 +159,22 @@ impl Profiler {
                         0.0
                     };
                     
+                    // Color code performance metrics
+                    let time_ms = timing.as_secs_f64() * 1000.0;
+                    let time_color = if time_ms > 10.0 { Color::Red } 
+                                   else if time_ms > 1.0 { Color::Yellow } 
+                                   else { Color::Green };
+                    
+                    let calls_color = if *calls > 100 { Color::Red }
+                                    else if *calls > 10 { Color::Yellow }
+                                    else { Color::Green };
+                    
                     table.add_row(vec![
-                        Cell::new(function_name),
-                        Cell::new(calls.to_string()),
-                        Cell::new(format!("{:.3}", timing.as_secs_f64() * 1000.0)),
-                        Cell::new(instructions.to_string()),
-                        Cell::new(format!("{:.1}", avg_time_us)),
+                        Cell::new(function_name).fg(Color::White),
+                        Cell::new(calls.to_string()).fg(calls_color),
+                        Cell::new(format!("{:.3}", time_ms)).fg(time_color),
+                        Cell::new(instructions.to_string()).fg(Color::Blue),
+                        Cell::new(format!("{:.1}", avg_time_us)).fg(Color::Magenta),
                     ]);
                 }
                 
@@ -164,25 +183,37 @@ impl Profiler {
                 // Performance Summary Table
                 let mut summary_table = Table::new();
                 summary_table.load_preset(UTF8_FULL);
-                summary_table.set_header(vec!["Metric", "Value"]);
+                summary_table.set_header(vec![
+                    Cell::new("Performance Metric").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                    Cell::new("Value").add_attribute(Attribute::Bold).fg(Color::White),
+                ]);
+                
+                // Color code memory metrics
+                let stack_color = if self.peak_stack_depth > 50 { Color::Red }
+                                else if self.peak_stack_depth > 20 { Color::Yellow }
+                                else { Color::Green };
+                
+                let heap_color = if self.peak_heap_size > 10000 { Color::Red }
+                               else if self.peak_heap_size > 1000 { Color::Yellow }
+                               else { Color::Green };
                 
                 summary_table.add_row(vec![
-                    Cell::new("Peak Stack Depth"),
-                    Cell::new(format!("{} frames", self.peak_stack_depth)),
+                    Cell::new("Peak Stack Depth").fg(Color::White),
+                    Cell::new(format!("{} frames", self.peak_stack_depth)).fg(stack_color),
                 ]);
                 summary_table.add_row(vec![
-                    Cell::new("Total Allocations"),
-                    Cell::new(self.total_allocations.to_string()),
+                    Cell::new("Total Allocations").fg(Color::White),
+                    Cell::new(self.total_allocations.to_string()).fg(Color::Blue),
                 ]);
                 summary_table.add_row(vec![
-                    Cell::new("Peak Heap Size"),
-                    Cell::new(format!("{} bytes", self.peak_heap_size)),
+                    Cell::new("Peak Heap Size").fg(Color::White),
+                    Cell::new(format!("{} bytes", self.peak_heap_size)).fg(heap_color),
                 ]);
                 
                 println!("{}", summary_table);
             }
             OutputMode::Plain => {
-                println!("Function Summary:");
+                println!("{}", "Function Summary:".bright_cyan().bold());
                 let mut functions: Vec<_> = self.function_timings.keys().collect();
                 functions.sort();
                 
@@ -190,13 +221,21 @@ impl Profiler {
                     let timing = self.function_timings.get(function_name).unwrap();
                     let instructions = self.instruction_counts.get(function_name).unwrap_or(&0);
                     let calls = self.call_counts.get(function_name).unwrap_or(&0);
-                    println!("  {} - {} calls - {:.3} ms - {} instructions", 
-                        function_name, calls, timing.as_secs_f64() * 1000.0, instructions);
+                    let time_ms = timing.as_secs_f64() * 1000.0;
+                    
+                    println!("  {} - {} calls - {} ms - {} instructions", 
+                        function_name.white(),
+                        format!("{}", calls).green(),
+                        format!("{:.3}", time_ms).yellow(),
+                        format!("{}", instructions).blue());
                 }
                 
-                println!("\nPeak Stack Depth: {} frames", self.peak_stack_depth);
-                println!("Total Allocations: {}", self.total_allocations);
-                println!("Peak Heap Size: {} bytes", self.peak_heap_size);
+                println!("\n{}: {} frames", "Peak Stack Depth".bright_cyan(), 
+                         format!("{}", self.peak_stack_depth).green());
+                println!("{}: {}", "Total Allocations".bright_cyan(), 
+                         format!("{}", self.total_allocations).blue());
+                println!("{}: {} bytes", "Peak Heap Size".bright_cyan(), 
+                         format!("{}", self.peak_heap_size).yellow());
             }
         }
     }
@@ -329,34 +368,46 @@ fn report_gc_stats(stats: &GcStats, config: &VMConfig) {
         OutputMode::PrettyTable => {
             let mut table = Table::new();
             table.load_preset(UTF8_FULL);
-            table.set_header(vec!["Metric", "Value"]);
-
-            table.add_row(vec![
-                Cell::new("Total Allocated"),
-                Cell::new(&stats.total_allocated.to_string()),
-            ]);
-            table.add_row(vec![
-                Cell::new("Total Freed"),
-                Cell::new(&stats.total_freed.to_string()),
-            ]);
-            table.add_row(vec![
-                Cell::new("Currently Allocated"),
-                Cell::new(&stats.current_allocated.to_string()),
-            ]);
-            table.add_row(vec![
-                Cell::new("Collections Performed"),
-                Cell::new(&stats.collections_performed.to_string()),
+            table.set_header(vec![
+                Cell::new("GC Metric").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                Cell::new("Value").add_attribute(Attribute::Bold).fg(Color::White),
             ]);
 
-            println!("=== GC Statistics ===");
+            // Color code memory metrics
+            let current_color = if stats.current_allocated > 10000 { Color::Red }
+                              else if stats.current_allocated > 1000 { Color::Yellow }
+                              else { Color::Green };
+
+            table.add_row(vec![
+                Cell::new("Total Allocated").fg(Color::White),
+                Cell::new(&stats.total_allocated.to_string()).fg(Color::Blue),
+            ]);
+            table.add_row(vec![
+                Cell::new("Total Freed").fg(Color::White),
+                Cell::new(&stats.total_freed.to_string()).fg(Color::Green),
+            ]);
+            table.add_row(vec![
+                Cell::new("Currently Allocated").fg(Color::White),
+                Cell::new(&stats.current_allocated.to_string()).fg(current_color),
+            ]);
+            table.add_row(vec![
+                Cell::new("Collections Performed").fg(Color::White),
+                Cell::new(&stats.collections_performed.to_string()).fg(Color::Magenta),
+            ]);
+
+            println!("{}", "═══ GC Statistics ═══".bright_cyan().bold());
             println!("{table}");
         }
         OutputMode::Plain => {
-            println!("=== GC Statistics ===");
-            println!("Total allocated: {}", stats.total_allocated);
-            println!("Total freed: {}", stats.total_freed);
-            println!("Currently allocated: {}", stats.current_allocated);
-            println!("Collections performed: {}", stats.collections_performed);
+            println!("{}", "═══ GC Statistics ═══".bright_cyan().bold());
+            println!("{}: {}", "Total allocated".bright_cyan(), 
+                     format!("{}", stats.total_allocated).blue());
+            println!("{}: {}", "Total freed".bright_cyan(), 
+                     format!("{}", stats.total_freed).green());
+            println!("{}: {}", "Currently allocated".bright_cyan(), 
+                     format!("{}", stats.current_allocated).yellow());
+            println!("{}: {}", "Collections performed".bright_cyan(), 
+                     format!("{}", stats.collections_performed).magenta());
         }
     }
 }
@@ -1013,7 +1064,11 @@ impl VM {
                 } else {
                     String::new()
                 };
-                println!("[trace] {}{:?} @ 0x{:04X}", indent, instruction, self.ip);
+                println!("{} {}{} @ {}", 
+                         "[trace]".bright_blue(),
+                         indent, 
+                         format!("{:?}", instruction).white(),
+                         format!("0x{:04X}", self.ip).cyan());
             }
 
             // Debugging support
@@ -1189,7 +1244,11 @@ impl VM {
                         } else {
                             String::new()
                         };
-                        println!("[trace] {}CALL {} with {} params", indent, function_name, params.len());
+                        println!("{} {}CALL {} with {} params", 
+                                 "[trace]".bright_blue(),
+                                 indent, 
+                                 function_name.yellow(),
+                                 format!("{}", params.len()).green());
                     }
                     
                     // Function profiling
@@ -1217,7 +1276,11 @@ impl VM {
                                 } else {
                                     String::new()
                                 };
-                                println!("[trace] {}RETURN from {}{}", indent, function_name, return_value);
+                                println!("{} {}RETURN from {}{}", 
+                                         "[trace]".bright_blue(),
+                                         indent, 
+                                         function_name.yellow(),
+                                         return_value.green());
                             }
                         }
                     }
@@ -3547,44 +3610,47 @@ fn run_comprehensive_tests() {
     }
     
     println!();
-    println!("=== Test Summary ===");
+    println!("{}", "═══ Test Summary ═══".bright_cyan().bold());
     
     // Create a table for the summary
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_header(vec!["Result", "Count"]);
+    table.set_header(vec![
+        Cell::new("Result").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        Cell::new("Count").add_attribute(Attribute::Bold).fg(Color::White),
+    ]);
     
     table.add_row(vec![
-        Cell::new("Passed"),
-        Cell::new(&passed.to_string()),
+        Cell::new("Passed").fg(Color::White),
+        Cell::new(&passed.to_string()).fg(Color::Green),
     ]);
     table.add_row(vec![
-        Cell::new("Failed"),
-        Cell::new(&failed.to_string()),
+        Cell::new("Failed").fg(Color::White),
+        Cell::new(&failed.to_string()).fg(if failed > 0 { Color::Red } else { Color::Green }),
     ]);
     table.add_row(vec![
-        Cell::new("Skipped"),
-        Cell::new(&skipped.to_string()),
+        Cell::new("Skipped").fg(Color::White),
+        Cell::new(&skipped.to_string()).fg(Color::Yellow),
     ]);
     table.add_row(vec![
-        Cell::new("Total"),
-        Cell::new(&(passed + failed + skipped).to_string()),
+        Cell::new("Total").fg(Color::White),
+        Cell::new(&(passed + failed + skipped).to_string()).fg(Color::Cyan),
     ]);
     
     println!("{table}");
     
     if failed > 0 {
         println!();
-        println!("Failed Tests:");
+        println!("{}", "Failed Tests:".bright_red().bold());
         for result in &results {
             if !result.passed {
-                println!("   - {}: {}", result.name, result.actual);
+                println!("   - {}: {}", result.name.red(), result.actual.yellow());
             }
         }
         std::process::exit(1);
     } else {
         println!();
-        println!("All tests passed!");
+        println!("{}", "All tests passed!".bright_green().bold());
     }
 }
 

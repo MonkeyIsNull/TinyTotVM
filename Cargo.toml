@@ -12,3 +12,5 @@ path = "src/main.rs"
 [dependencies]
 byteorder = "1.4"
 comfy-table = "7"
+colored = "2.0"
+tabled = "0.15"
