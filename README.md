@@ -21,7 +21,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 - **Debugging**: Step-by-step execution tracing, performance metrics, profiling support
 - **Performance**: Pre-allocated stacks, instruction counting, advanced optimization engine
 - **Pluggable GC**: Multiple garbage collection engines with runtime selection
-- **Testing**: 67 comprehensive tests with prettified formatted output
+- **Testing**: 67 comprehensive tests with color-coded formatted output
 
 ## Quick Start
 
@@ -68,7 +68,7 @@ ttvm --trace --profile examples/program.ttvm
 ttvm --profile --no-table examples/program.ttvm
 ```
 
-**Tracing Output:**
+**Tracing Output** (with color coding):
 ```
 [trace] PushInt(10) @ 0x0002
 [trace] Call { addr: 11, params: ["a", "b"] } @ 0x0004
@@ -78,7 +78,7 @@ ttvm --profile --no-table examples/program.ttvm
 [trace] RETURN from fn@0x000B → Int(15)
 ```
 
-**Profiling Output:**
+**Profiling Output** (with performance-based color coding):
 ```
 === Profiling Results ===
 ┌───────────┬───────┬───────────┬──────────────┬────────────────────┐
@@ -87,6 +87,7 @@ ttvm --profile --no-table examples/program.ttvm
 │ fn@0x000B ┆ 1     ┆ 0.026     ┆ 4            ┆ 26.0               │
 └───────────┴───────┴───────────┴──────────────┴────────────────────┘
 ```
+*Performance metrics are color-coded: green (fast), yellow (moderate), red (slow)*
 
 ### Testing
 ```bash
