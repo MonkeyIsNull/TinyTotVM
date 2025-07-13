@@ -248,6 +248,165 @@ enum OpCode {
     Export(String),    // export variable/function by name
 }
 
+// Garbage Collection Engine Trait
+trait GcEngine: std::fmt::Debug {
+    fn alloc(&mut self, value: Value) -> GcRef;
+    fn mark_from_roots(&mut self, roots: &[&Value]);
+    fn sweep(&mut self) -> usize; // returns number of objects collected
+    fn stats(&self) -> GcStats;
+}
+
+#[derive(Debug, Clone)]
+pub struct GcStats {
+    pub total_allocated: usize,
+    pub total_freed: usize,
+    pub current_allocated: usize,
+    pub collections_performed: usize,
+}
+
+// GC Reference wrapper
+#[derive(Debug, Clone)]
+pub struct GcRef {
+    id: usize,
+    generation: usize,
+}
+
+impl GcRef {
+    fn new(id: usize) -> Self {
+        GcRef { id, generation: 0 }
+    }
+}
+
+// Mark and Sweep Garbage Collector
+#[derive(Debug)]
+struct MarkSweepGc {
+    objects: HashMap<usize, (Value, bool)>, // id -> (value, marked)
+    next_id: usize,
+    stats: GcStats,
+    debug_mode: bool,
+}
+
+impl MarkSweepGc {
+    fn new(debug_mode: bool) -> Self {
+        MarkSweepGc {
+            objects: HashMap::new(),
+            next_id: 0,
+            stats: GcStats {
+                total_allocated: 0,
+                total_freed: 0,
+                current_allocated: 0,
+                collections_performed: 0,
+            },
+            debug_mode,
+        }
+    }
+}
+
+impl GcEngine for MarkSweepGc {
+    fn alloc(&mut self, value: Value) -> GcRef {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.objects.insert(id, (value, false));
+        self.stats.total_allocated += 1;
+        self.stats.current_allocated += 1;
+        
+        if self.debug_mode {
+            println!("GC: Allocated object {} (total: {})", id, self.stats.current_allocated);
+        }
+        
+        GcRef::new(id)
+    }
+
+    fn mark_from_roots(&mut self, _roots: &[&Value]) {
+        // Mark all objects for now (simplified marking)
+        for (_, (_, marked)) in self.objects.iter_mut() {
+            *marked = true;
+        }
+        
+        if self.debug_mode {
+            println!("GC: Marked {} objects", self.objects.len());
+        }
+    }
+
+    fn sweep(&mut self) -> usize {
+        let initial_count = self.objects.len();
+        self.objects.retain(|id, (_, marked)| {
+            if *marked {
+                true
+            } else {
+                if self.debug_mode {
+                    println!("GC: Collecting object {}", id);
+                }
+                false
+            }
+        });
+        
+        // Reset marks for next collection
+        for (_, (_, marked)) in self.objects.iter_mut() {
+            *marked = false;
+        }
+        
+        let collected = initial_count - self.objects.len();
+        self.stats.total_freed += collected;
+        self.stats.current_allocated -= collected;
+        self.stats.collections_performed += 1;
+        
+        if self.debug_mode {
+            println!("GC: Collected {} objects, {} remaining", collected, self.objects.len());
+        }
+        
+        collected
+    }
+
+    fn stats(&self) -> GcStats {
+        self.stats.clone()
+    }
+}
+
+// No-op Garbage Collector (for testing and comparison)
+#[derive(Debug)]
+struct NoGc {
+    next_id: usize,
+    stats: GcStats,
+}
+
+impl NoGc {
+    fn new() -> Self {
+        NoGc {
+            next_id: 0,
+            stats: GcStats {
+                total_allocated: 0,
+                total_freed: 0,
+                current_allocated: 0,
+                collections_performed: 0,
+            },
+        }
+    }
+}
+
+impl GcEngine for NoGc {
+    fn alloc(&mut self, _value: Value) -> GcRef {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.stats.total_allocated += 1;
+        self.stats.current_allocated += 1;
+        GcRef::new(id)
+    }
+
+    fn mark_from_roots(&mut self, _roots: &[&Value]) {
+        // No-op
+    }
+
+    fn sweep(&mut self) -> usize {
+        self.stats.collections_performed += 1;
+        0 // Never collect anything
+    }
+
+    fn stats(&self) -> GcStats {
+        self.stats.clone()
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ExceptionHandler {
     catch_addr: usize,           // address to jump to on exception
@@ -276,10 +435,27 @@ struct VM {
     // Debugging support
     debug_mode: bool,
     breakpoints: Vec<usize>,
+    // Garbage Collection
+    gc_engine: Box<dyn GcEngine>,           // Pluggable GC engine
+    gc_stats_enabled: bool,                 // Whether to show GC stats
 }
 
 impl VM {
     fn new(instructions: Vec<OpCode>) -> Self {
+        Self::new_with_gc(instructions, "mark-sweep", false, false)
+    }
+
+    fn new_with_debug(instructions: Vec<OpCode>, debug_mode: bool) -> Self {
+        Self::new_with_gc(instructions, "mark-sweep", debug_mode, false)
+    }
+
+    fn new_with_gc(instructions: Vec<OpCode>, gc_type: &str, debug_mode: bool, gc_stats_enabled: bool) -> Self {
+        let gc_engine: Box<dyn GcEngine> = match gc_type {
+            "no-gc" => Box::new(NoGc::new()),
+            "mark-sweep" => Box::new(MarkSweepGc::new(debug_mode)),
+            _ => Box::new(MarkSweepGc::new(debug_mode)), // Default to mark-sweep
+        };
+
         VM {
             stack: Vec::with_capacity(1024), // Pre-allocate stack capacity
             instructions,
@@ -293,15 +469,11 @@ impl VM {
             lambda_captures: HashMap::new(),
             max_stack_size: 0,
             instruction_count: 0,
-            debug_mode: false,
+            debug_mode,
             breakpoints: Vec::new(),
+            gc_engine,
+            gc_stats_enabled,
         }
-    }
-
-    fn new_with_debug(instructions: Vec<OpCode>, debug_mode: bool) -> Self {
-        let mut vm = Self::new(instructions);
-        vm.debug_mode = debug_mode;
-        vm
     }
 
     #[allow(dead_code)]
@@ -319,6 +491,37 @@ impl VM {
 
     fn get_stats(&self) -> (usize, usize, usize) {
         (self.instruction_count, self.max_stack_size, self.stack.len())
+    }
+
+    fn get_gc_stats(&self) -> GcStats {
+        self.gc_engine.stats()
+    }
+
+    fn trigger_gc(&mut self) {
+        // Collect roots from stack and variables
+        let mut roots: Vec<&Value> = Vec::new();
+        
+        // Add stack values as roots
+        for value in &self.stack {
+            roots.push(value);
+        }
+        
+        // Add variables as roots
+        for frame in &self.variables {
+            for (_name, value) in frame {
+                roots.push(value);
+            }
+        }
+        
+        // Mark from roots
+        self.gc_engine.mark_from_roots(&roots);
+        
+        // Sweep unreachable objects
+        let collected = self.gc_engine.sweep();
+        
+        if self.debug_mode {
+            println!("GC triggered: collected {} objects", collected);
+        }
     }
 
     // Safe stack operations
@@ -2713,15 +2916,20 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: tinytotvm [--debug] [--optimize] <program.ttvm|program.ttb>");
-        eprintln!("       tinytotvm compile <input.ttvm> <output.ttb>");
-        eprintln!("       tinytotvm compile-lisp <input.lisp> <output.ttvm>");
-        eprintln!("       tinytotvm optimize <input.ttvm> <output.ttvm>");
+        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] <program.ttvm|program.ttb>");
+        eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
+        eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
+        eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
+        eprintln!("");
+        eprintln!("GC Types: mark-sweep (default), no-gc");
         std::process::exit(1);
     }
 
     let mut debug_mode = false;
     let mut optimize_mode = false;
+    let mut gc_type = "mark-sweep";
+    let mut gc_debug = false;
+    let mut gc_stats = false;
     let mut file_index = 1;
 
     // Check for flags
@@ -2733,6 +2941,26 @@ fn main() {
             }
             "--optimize" => {
                 optimize_mode = true;
+                file_index += 1;
+            }
+            "--gc" => {
+                if file_index + 1 >= args.len() {
+                    eprintln!("--gc flag requires a garbage collector type");
+                    std::process::exit(1);
+                }
+                gc_type = &args[file_index + 1];
+                if gc_type != "mark-sweep" && gc_type != "no-gc" {
+                    eprintln!("Unknown GC type: {}. Valid options: mark-sweep, no-gc", gc_type);
+                    std::process::exit(1);
+                }
+                file_index += 2;
+            }
+            "--gc-debug" => {
+                gc_debug = true;
+                file_index += 1;
+            }
+            "--gc-stats" => {
+                gc_stats = true;
                 file_index += 1;
             }
             _ => {
@@ -2822,14 +3050,24 @@ fn main() {
         println!();
     }
 
-    let mut vm = VM::new_with_debug(program, debug_mode);
+    let mut vm = VM::new_with_gc(program, gc_type, debug_mode || gc_debug, gc_stats);
     if let Err(e) = vm.run() {
         eprintln!("VM runtime error: {}", e);
         std::process::exit(1);
     }
+    
     if debug_mode {
         let (instructions, max_stack, final_stack) = vm.get_stats();
         println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
             instructions, max_stack, final_stack);
+    }
+    
+    if gc_stats {
+        let stats = vm.get_gc_stats();
+        println!("=== GC Statistics ===");
+        println!("Total allocated: {}", stats.total_allocated);
+        println!("Total freed: {}", stats.total_freed);
+        println!("Currently allocated: {}", stats.current_allocated);
+        println!("Collections performed: {}", stats.collections_performed);
     }
 }
