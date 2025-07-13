@@ -1,0 +1,145 @@
+; TinyTotVM Standard Library - Network Module
+; Provides network operations and utilities
+
+JMP main
+
+; DNS resolution
+LABEL dns_resolve_func
+LOAD hostname
+DNS_RESOLVE
+RET
+
+; HTTP GET request
+LABEL http_get_func
+LOAD url
+HTTP_GET
+RET
+
+; HTTP POST request
+LABEL http_post_func
+LOAD url
+LOAD data
+HTTP_POST
+RET
+
+; TCP operations
+LABEL tcp_connect_func
+LOAD host
+LOAD port
+TCP_CONNECT
+RET
+
+LABEL tcp_listen_func
+LOAD port
+TCP_LISTEN
+RET
+
+LABEL tcp_send_func
+LOAD connection
+LOAD data
+TCP_SEND
+RET
+
+LABEL tcp_recv_func
+LOAD connection
+LOAD buffer_size
+TCP_RECV
+RET
+
+; UDP operations
+LABEL udp_bind_func
+LOAD port
+UDP_BIND
+RET
+
+LABEL udp_send_func
+LOAD socket
+LOAD host
+LOAD port
+LOAD data
+UDP_SEND
+RET
+
+LABEL udp_recv_func
+LOAD socket
+LOAD buffer_size
+UDP_RECV
+RET
+
+; URL utilities (simplified)
+LABEL parse_url_func
+LOAD url
+; Simplified URL parsing - return components as object
+MAKE_OBJECT
+PUSH_STR "http"
+SET_FIELD protocol
+PUSH_STR "example.com"
+SET_FIELD host
+PUSH_INT 80
+SET_FIELD port
+PUSH_STR "/path"
+SET_FIELD path
+RET
+
+LABEL build_url_func
+LOAD components
+; Simplified URL building - return constructed URL
+PUSH_STR "http://example.com:80/path"
+RET
+
+LABEL main
+
+; Export DNS functions
+MAKE_FUNCTION dns_resolve_func hostname
+STORE dns_resolve
+EXPORT dns_resolve
+
+; Export HTTP functions
+MAKE_FUNCTION http_get_func url
+STORE http_get
+EXPORT http_get
+
+MAKE_FUNCTION http_post_func url data
+STORE http_post
+EXPORT http_post
+
+; Export TCP functions
+MAKE_FUNCTION tcp_connect_func host port
+STORE tcp_connect
+EXPORT tcp_connect
+
+MAKE_FUNCTION tcp_listen_func port
+STORE tcp_listen
+EXPORT tcp_listen
+
+MAKE_FUNCTION tcp_send_func connection data
+STORE tcp_send
+EXPORT tcp_send
+
+MAKE_FUNCTION tcp_recv_func connection buffer_size
+STORE tcp_recv
+EXPORT tcp_recv
+
+; Export UDP functions
+MAKE_FUNCTION udp_bind_func port
+STORE udp_bind
+EXPORT udp_bind
+
+MAKE_FUNCTION udp_send_func socket host port data
+STORE udp_send
+EXPORT udp_send
+
+MAKE_FUNCTION udp_recv_func socket buffer_size
+STORE udp_recv
+EXPORT udp_recv
+
+; Export URL utilities
+MAKE_FUNCTION parse_url_func url
+STORE parse_url
+EXPORT parse_url
+
+MAKE_FUNCTION build_url_func components
+STORE build_url
+EXPORT build_url
+
+HALT

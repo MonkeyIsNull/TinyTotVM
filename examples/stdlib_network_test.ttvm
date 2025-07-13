@@ -1,0 +1,127 @@
+; Test network standard library functions
+
+IMPORT std/network.ttvm
+
+PUSH_STR "=== Network Standard Library Test ==="
+PRINT
+
+; Test DNS resolution
+PUSH_STR "--- DNS Resolution ---"
+PRINT
+
+PUSH_STR "localhost"
+LOAD dns_resolve
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "google.com"
+LOAD dns_resolve
+CALL_FUNCTION
+PRINT
+
+; Test HTTP functions
+PUSH_STR "--- HTTP Functions ---"
+PRINT
+
+PUSH_STR "https://api.github.com/users/octocat"
+LOAD http_get
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "https://httpbin.org/post"
+PUSH_STR "{\"message\": \"Hello from TinyTotVM!\"}"
+LOAD http_post
+CALL_FUNCTION
+PRINT
+
+; Test TCP functions
+PUSH_STR "--- TCP Functions ---"
+PRINT
+
+PUSH_INT 0
+LOAD tcp_listen
+CALL_FUNCTION
+STORE listener
+
+PUSH_STR "TCP Listener:"
+PRINT
+LOAD listener
+PRINT
+
+PUSH_STR "google.com"
+PUSH_INT 80
+LOAD tcp_connect
+CALL_FUNCTION
+STORE connection
+
+PUSH_STR "TCP Connection:"
+PRINT
+LOAD connection
+PRINT
+
+LOAD connection
+PUSH_STR "GET / HTTP/1.0\r\n\r\n"
+LOAD tcp_send
+CALL_FUNCTION
+PRINT
+
+LOAD connection
+PUSH_INT 1024
+LOAD tcp_recv
+CALL_FUNCTION
+PRINT
+
+; Test UDP functions
+PUSH_STR "--- UDP Functions ---"
+PRINT
+
+PUSH_INT 0
+LOAD udp_bind
+CALL_FUNCTION
+STORE udp_socket
+
+PUSH_STR "UDP Socket:"
+PRINT
+LOAD udp_socket
+PRINT
+
+LOAD udp_socket
+PUSH_STR "127.0.0.1"
+PUSH_INT 12345
+PUSH_STR "Hello UDP from stdlib!"
+LOAD udp_send
+CALL_FUNCTION
+PRINT
+
+LOAD udp_socket
+PUSH_INT 1024
+LOAD udp_recv
+CALL_FUNCTION
+PRINT
+
+; Test URL utilities
+PUSH_STR "--- URL Utilities ---"
+PRINT
+
+PUSH_STR "https://api.example.com:443/v1/users?page=1"
+LOAD parse_url
+CALL_FUNCTION
+PRINT
+
+MAKE_OBJECT
+PUSH_STR "https"
+SET_FIELD protocol
+PUSH_STR "api.example.com"
+SET_FIELD host
+PUSH_INT 443
+SET_FIELD port
+PUSH_STR "/v1/users"
+SET_FIELD path
+LOAD build_url
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "=== Network Standard Library Test Complete ==="
+PRINT
+
+HALT

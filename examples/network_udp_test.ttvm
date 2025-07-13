@@ -1,0 +1,42 @@
+; UDP Network Test
+
+PUSH_STR "=== UDP Network Test ==="
+PRINT
+
+; Test UDP bind
+PUSH_STR "Binding UDP socket..."
+PRINT
+
+PUSH_INT 0  ; Port 0 means any available port
+UDP_BIND
+STORE udp_socket
+
+PUSH_STR "UDP socket bound:"
+PRINT
+LOAD udp_socket
+PRINT
+
+; Test UDP send
+PUSH_STR "Sending UDP packet..."
+PRINT
+
+LOAD udp_socket
+PUSH_STR "127.0.0.1"
+PUSH_INT 12345
+PUSH_STR "Hello UDP World!"
+UDP_SEND
+PRINT
+
+; Test UDP receive
+PUSH_STR "Receiving UDP packet (mock)..."
+PRINT
+
+LOAD udp_socket
+PUSH_INT 1024
+UDP_RECV
+PRINT
+
+PUSH_STR "=== UDP Test Complete ==="
+PRINT
+
+HALT

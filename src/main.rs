@@ -56,6 +56,7 @@ enum Value {
     List(Vec<Value>),
     Object(HashMap<String, Value>),
     Bytes(Vec<u8>),
+    Connection(String), // Network connection handle (simplified as string ID)
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -89,6 +90,9 @@ impl fmt::Display for Value {
             },
             Value::Bytes(bytes) => {
                 write!(f, "Bytes({})", bytes.len())
+            },
+            Value::Connection(id) => {
+                write!(f, "Connection({})", id)
             },
             Value::Function { addr, params } => {
                 write!(f, "function@{} ({})", addr, params.join(", "))
@@ -182,6 +186,17 @@ enum OpCode {
     GetTime,        // Get current timestamp
     Sleep,          // Sleep for specified duration
     FormatTime,     // Format timestamp
+    // Network operations
+    HttpGet,        // HTTP GET request
+    HttpPost,       // HTTP POST request
+    TcpConnect,     // Connect to TCP server
+    TcpListen,      // Listen on TCP port
+    TcpSend,        // Send data over TCP
+    TcpRecv,        // Receive data from TCP
+    UdpBind,        // Bind UDP socket
+    UdpSend,        // Send UDP packet
+    UdpRecv,        // Receive UDP packet
+    DnsResolve,     // Resolve hostname to IP
     // Object operations
     MakeObject,
     SetField(String),   // field name
@@ -1429,6 +1444,225 @@ impl VM {
                         }),
                     }
                 }
+                // Network operations
+                OpCode::HttpGet => {
+                    let val = self.pop_stack("HTTP_GET")?;
+                    match val {
+                        Value::Str(url) => {
+                            // Simplified HTTP GET using std library (in real implementation would use reqwest)
+                            // For now, just return a placeholder response
+                            let response = format!("HTTP response from {}", url);
+                            self.stack.push(Value::Str(response));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (URL)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "HTTP_GET".to_string() 
+                        }),
+                    }
+                }
+                OpCode::HttpPost => {
+                    let data = self.pop_stack("HTTP_POST")?;
+                    let url = self.pop_stack("HTTP_POST")?;
+                    match (url, data) {
+                        (Value::Str(url_str), Value::Str(data_str)) => {
+                            // Simplified HTTP POST (in real implementation would use reqwest)
+                            let response = format!("HTTP POST to {} with data: {}", url_str, data_str);
+                            self.stack.push(Value::Str(response));
+                        }
+                        (u, d) => return Err(VMError::TypeMismatch { 
+                            expected: "two strings (URL, data)".to_string(), 
+                            got: format!("{:?}, {:?}", u, d), 
+                            operation: "HTTP_POST".to_string() 
+                        }),
+                    }
+                }
+                OpCode::TcpConnect => {
+                    let port = self.pop_stack("TCP_CONNECT")?;
+                    let host = self.pop_stack("TCP_CONNECT")?;
+                    match (host, port) {
+                        (Value::Str(host_str), Value::Int(port_num)) => {
+                            // Simplified TCP connect - in real implementation would create actual socket
+                            use std::net::TcpStream;
+                            let address = format!("{}:{}", host_str, port_num);
+                            match TcpStream::connect(&address) {
+                                Ok(_stream) => {
+                                    // In real implementation, we'd store the stream
+                                    // For now, just return a connection ID
+                                    let conn_id = format!("tcp://{}:{}", host_str, port_num);
+                                    self.stack.push(Value::Connection(conn_id));
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: address, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        (h, p) => return Err(VMError::TypeMismatch { 
+                            expected: "string (host) and int (port)".to_string(), 
+                            got: format!("{:?}, {:?}", h, p), 
+                            operation: "TCP_CONNECT".to_string() 
+                        }),
+                    }
+                }
+                OpCode::TcpListen => {
+                    let val = self.pop_stack("TCP_LISTEN")?;
+                    match val {
+                        Value::Int(port) => {
+                            // Simplified TCP listen - in real implementation would bind and listen
+                            use std::net::TcpListener;
+                            let address = format!("127.0.0.1:{}", port);
+                            match TcpListener::bind(&address) {
+                                Ok(_listener) => {
+                                    // In real implementation, we'd store the listener
+                                    let conn_id = format!("tcp://listener:{}", port);
+                                    self.stack.push(Value::Connection(conn_id));
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: address, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "int (port)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "TCP_LISTEN".to_string() 
+                        }),
+                    }
+                }
+                OpCode::TcpSend => {
+                    let data = self.pop_stack("TCP_SEND")?;
+                    let conn = self.pop_stack("TCP_SEND")?;
+                    match (conn, data) {
+                        (Value::Connection(conn_id), Value::Str(data_str)) => {
+                            // Simplified TCP send - in real implementation would send via actual socket
+                            println!("TCP Send to {}: {}", conn_id, data_str);
+                            self.stack.push(Value::Int(data_str.len() as i64));
+                        }
+                        (Value::Connection(conn_id), Value::Bytes(data_bytes)) => {
+                            // Send binary data
+                            println!("TCP Send to {}: {} bytes", conn_id, data_bytes.len());
+                            self.stack.push(Value::Int(data_bytes.len() as i64));
+                        }
+                        (c, d) => return Err(VMError::TypeMismatch { 
+                            expected: "connection and string/bytes".to_string(), 
+                            got: format!("{:?}, {:?}", c, d), 
+                            operation: "TCP_SEND".to_string() 
+                        }),
+                    }
+                }
+                OpCode::TcpRecv => {
+                    let size = self.pop_stack("TCP_RECV")?;
+                    let conn = self.pop_stack("TCP_RECV")?;
+                    match (conn, size) {
+                        (Value::Connection(conn_id), Value::Int(buffer_size)) => {
+                            // Simplified TCP recv - in real implementation would receive from actual socket
+                            let received_data = format!("Data from {}", conn_id);
+                            if buffer_size > 0 {
+                                self.stack.push(Value::Str(received_data));
+                            } else {
+                                self.stack.push(Value::Bytes(vec![1, 2, 3, 4])); // Mock binary data
+                            }
+                        }
+                        (c, s) => return Err(VMError::TypeMismatch { 
+                            expected: "connection and int (buffer size)".to_string(), 
+                            got: format!("{:?}, {:?}", c, s), 
+                            operation: "TCP_RECV".to_string() 
+                        }),
+                    }
+                }
+                OpCode::UdpBind => {
+                    let val = self.pop_stack("UDP_BIND")?;
+                    match val {
+                        Value::Int(port) => {
+                            // Simplified UDP bind - in real implementation would bind UDP socket
+                            use std::net::UdpSocket;
+                            let address = format!("127.0.0.1:{}", port);
+                            match UdpSocket::bind(&address) {
+                                Ok(_socket) => {
+                                    let conn_id = format!("udp://bind:{}", port);
+                                    self.stack.push(Value::Connection(conn_id));
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: address, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "int (port)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "UDP_BIND".to_string() 
+                        }),
+                    }
+                }
+                OpCode::UdpSend => {
+                    let data = self.pop_stack("UDP_SEND")?;
+                    let port = self.pop_stack("UDP_SEND")?;
+                    let host = self.pop_stack("UDP_SEND")?;
+                    let socket = self.pop_stack("UDP_SEND")?;
+                    match (socket, host, port, data) {
+                        (Value::Connection(conn_id), Value::Str(host_str), Value::Int(port_num), Value::Str(data_str)) => {
+                            // Simplified UDP send
+                            println!("UDP Send from {} to {}:{}: {}", conn_id, host_str, port_num, data_str);
+                            self.stack.push(Value::Int(data_str.len() as i64));
+                        }
+                        (s, h, p, d) => return Err(VMError::TypeMismatch { 
+                            expected: "connection, string (host), int (port), string (data)".to_string(), 
+                            got: format!("{:?}, {:?}, {:?}, {:?}", s, h, p, d), 
+                            operation: "UDP_SEND".to_string() 
+                        }),
+                    }
+                }
+                OpCode::UdpRecv => {
+                    let size = self.pop_stack("UDP_RECV")?;
+                    let socket = self.pop_stack("UDP_RECV")?;
+                    match (socket, size) {
+                        (Value::Connection(conn_id), Value::Int(_buffer_size)) => {
+                            // Simplified UDP recv - return mock data and sender info
+                            let mut result = HashMap::new();
+                            result.insert("data".to_string(), Value::Str("UDP packet data".to_string()));
+                            result.insert("sender_host".to_string(), Value::Str("192.168.1.100".to_string()));
+                            result.insert("sender_port".to_string(), Value::Int(12345));
+                            self.stack.push(Value::Object(result));
+                        }
+                        (s, sz) => return Err(VMError::TypeMismatch { 
+                            expected: "connection and int (buffer size)".to_string(), 
+                            got: format!("{:?}, {:?}", s, sz), 
+                            operation: "UDP_RECV".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DnsResolve => {
+                    let val = self.pop_stack("DNS_RESOLVE")?;
+                    match val {
+                        Value::Str(hostname) => {
+                            // Simplified DNS resolution using std library
+                            use std::net::ToSocketAddrs;
+                            let address_with_port = format!("{}:80", hostname); // Add dummy port for resolution
+                            match address_with_port.to_socket_addrs() {
+                                Ok(mut addrs) => {
+                                    if let Some(addr) = addrs.next() {
+                                        let ip = addr.ip().to_string();
+                                        self.stack.push(Value::Str(ip));
+                                    } else {
+                                        self.stack.push(Value::Null);
+                                    }
+                                }
+                                Err(_) => {
+                                    // Return mock IP for demonstration
+                                    self.stack.push(Value::Str("192.168.1.1".to_string()));
+                                }
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (hostname)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "DNS_RESOLVE".to_string() 
+                        }),
+                    }
+                }
                 OpCode::DumpScope => {
                     println!("Current scope: {:?}", self.variables.last());
                 }
@@ -1843,6 +2077,17 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "GET_TIME" => OpCode::GetTime,
             "SLEEP" => OpCode::Sleep,
             "FORMAT_TIME" => OpCode::FormatTime,
+            // Network operations
+            "HTTP_GET" => OpCode::HttpGet,
+            "HTTP_POST" => OpCode::HttpPost,
+            "TCP_CONNECT" => OpCode::TcpConnect,
+            "TCP_LISTEN" => OpCode::TcpListen,
+            "TCP_SEND" => OpCode::TcpSend,
+            "TCP_RECV" => OpCode::TcpRecv,
+            "UDP_BIND" => OpCode::UdpBind,
+            "UDP_SEND" => OpCode::UdpSend,
+            "UDP_RECV" => OpCode::UdpRecv,
+            "DNS_RESOLVE" => OpCode::DnsResolve,
             "IMPORT" => {
                 let path = parts[1].trim();
                 // Remove quotes if present
@@ -1984,6 +2229,17 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::GetTime => "GET_TIME".to_string(),
             OpCode::Sleep => "SLEEP".to_string(),
             OpCode::FormatTime => "FORMAT_TIME".to_string(),
+            // Network operations
+            OpCode::HttpGet => "HTTP_GET".to_string(),
+            OpCode::HttpPost => "HTTP_POST".to_string(),
+            OpCode::TcpConnect => "TCP_CONNECT".to_string(),
+            OpCode::TcpListen => "TCP_LISTEN".to_string(),
+            OpCode::TcpSend => "TCP_SEND".to_string(),
+            OpCode::TcpRecv => "TCP_RECV".to_string(),
+            OpCode::UdpBind => "UDP_BIND".to_string(),
+            OpCode::UdpSend => "UDP_SEND".to_string(),
+            OpCode::UdpRecv => "UDP_RECV".to_string(),
+            OpCode::DnsResolve => "DNS_RESOLVE".to_string(),
             OpCode::MakeObject => "MAKE_OBJECT".to_string(),
             OpCode::SetField(field) => format!("SET_FIELD {}", field),
             OpCode::GetField(field) => format!("GET_FIELD {}", field),

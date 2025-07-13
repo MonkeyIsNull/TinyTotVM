@@ -1,0 +1,54 @@
+; TCP Network Test
+
+PUSH_STR "=== TCP Network Test ==="
+PRINT
+
+; Test TCP listener on an available port
+PUSH_STR "Creating TCP listener..."
+PRINT
+
+PUSH_INT 0  ; Port 0 means any available port
+TCP_LISTEN
+STORE listener
+
+PUSH_STR "Listener created:"
+PRINT
+LOAD listener
+PRINT
+
+; Test TCP connection attempt (will likely fail but shows usage)
+PUSH_STR "Attempting TCP connection to Google..."
+PRINT
+
+PUSH_STR "google.com"
+PUSH_INT 80
+TCP_CONNECT
+STORE connection
+
+PUSH_STR "Connection created:"
+PRINT
+LOAD connection
+PRINT
+
+; Test TCP send
+PUSH_STR "Sending data..."
+PRINT
+
+LOAD connection
+PUSH_STR "GET / HTTP/1.0\r\n\r\n"
+TCP_SEND
+PRINT
+
+; Test TCP receive
+PUSH_STR "Receiving data..."
+PRINT
+
+LOAD connection
+PUSH_INT 1024
+TCP_RECV
+PRINT
+
+PUSH_STR "=== TCP Test Complete ==="
+PRINT
+
+HALT

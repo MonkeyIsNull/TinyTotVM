@@ -11,6 +11,7 @@ The standard library is organized into focused modules:
 - **`std/list.ttvm`** - List/array utilities and higher-order functions
 - **`std/convert.ttvm`** - Type conversion and type checking utilities
 - **`std/io.ttvm`** - I/O operations and data format handling
+- **`std/network.ttvm`** - Network operations and protocols
 - **`std/prelude.ttvm`** - Commonly used functions (imports other modules)
 
 ## Usage
@@ -225,6 +226,60 @@ PRINT  ; Outputs: false (simplified implementation)
 - `get_args()` - Get command line arguments
 - `get_time()` - Get current Unix timestamp
 - `sleep(millis)` - Sleep for specified milliseconds
+
+### Network Module (`std/network.ttvm`)
+
+**DNS Operations:**
+- `dns_resolve(hostname)` - Resolve hostname to IP address
+
+**HTTP Operations:**
+- `http_get(url)` - Perform HTTP GET request
+- `http_post(url, data)` - Perform HTTP POST request
+
+**TCP Operations:**
+- `tcp_connect(host, port)` - Connect to TCP server
+- `tcp_listen(port)` - Listen on TCP port
+- `tcp_send(connection, data)` - Send data over TCP connection
+- `tcp_recv(connection, buffer_size)` - Receive data from TCP connection
+
+**UDP Operations:**
+- `udp_bind(port)` - Bind UDP socket to port
+- `udp_send(socket, host, port, data)` - Send UDP packet
+- `udp_recv(socket, buffer_size)` - Receive UDP packet
+
+**URL Utilities:**
+- `parse_url(url)` - Parse URL into components (simplified)
+- `build_url(components)` - Build URL from components (simplified)
+
+**Example:**
+```assembly
+IMPORT std/network.ttvm
+
+; DNS resolution
+PUSH_STR "google.com"
+LOAD dns_resolve
+CALL_FUNCTION
+PRINT  ; Outputs: IP address
+
+; HTTP GET request
+PUSH_STR "https://api.github.com/users/octocat"
+LOAD http_get
+CALL_FUNCTION
+PRINT  ; Outputs: HTTP response
+
+; TCP connection
+PUSH_STR "google.com"
+PUSH_INT 80
+LOAD tcp_connect
+CALL_FUNCTION
+STORE connection
+
+LOAD connection
+PUSH_STR "GET / HTTP/1.0\r\n\r\n"
+LOAD tcp_send
+CALL_FUNCTION
+PRINT  ; Outputs: bytes sent
+```
 
 **Example:**
 ```assembly

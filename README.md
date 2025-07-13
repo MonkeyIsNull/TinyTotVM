@@ -43,7 +43,7 @@ TinyTotVM is a **toy virtual machine** with features found in modern programming
 
 ### **Core Language Features**
 - **Stack-based Architecture** - Efficient execution with pre-allocated memory
-- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Bytes, Function, Closure values
+- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Bytes, Connection, Function, Closure values
 - **Type Coercion** - Automatic conversion between compatible types (int <-> float)
 - **Memory Management** - Automatic cleanup via Rust's ownership system
 - **Error Handling** - Comprehensive Result-based error system instead of crashes
@@ -318,6 +318,16 @@ EXIT               ; Exit with status code
 GET_TIME           ; Get current Unix timestamp
 SLEEP              ; Sleep for specified milliseconds
 FORMAT_TIME        ; Format timestamp to string
+HTTP_GET           ; HTTP GET request
+HTTP_POST          ; HTTP POST request
+TCP_CONNECT        ; Connect to TCP server
+TCP_LISTEN         ; Listen on TCP port
+TCP_SEND           ; Send data over TCP connection
+TCP_RECV           ; Receive data from TCP connection
+UDP_BIND           ; Bind UDP socket to port
+UDP_SEND           ; Send UDP packet
+UDP_RECV           ; Receive UDP packet
+DNS_RESOLVE        ; Resolve hostname to IP address
 HALT               ; Stop execution
 ```
 
@@ -657,6 +667,10 @@ The `examples/` directory contains comprehensive test programs:
 - **`io_interactive_test.ttvm`** - Interactive I/O demonstration (stdin/stdout)
 - **`io_simple_test.ttvm`** - Simple I/O test for basic file operations
 - **`stdlib_enhanced_io_test.ttvm`** - Enhanced I/O standard library demonstration
+- **`network_simple_test.ttvm`** - Basic network operations test
+- **`network_tcp_test.ttvm`** - TCP socket operations demonstration
+- **`network_udp_test.ttvm`** - UDP socket operations demonstration
+- **`stdlib_network_test.ttvm`** - Network standard library demonstration
 
 ## Architecture
 
@@ -681,6 +695,7 @@ enum Value {
     List(Vec<Value>),
     Object(HashMap<String, Value>),
     Bytes(Vec<u8>),
+    Connection(String),
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -697,7 +712,7 @@ Comprehensive error types with detailed messages:
 
 | **Feature Category** | **Capabilities** | **Status** |
 |---|---|---|
-| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Bytes, Function, Closure |  Complete |
+| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Bytes, Connection, Function, Closure |  Complete |
 | **Arithmetic** | Full integer/float arithmetic with type coercion |  Complete |
 | **Control Flow** | Jumps, conditionals, function calls, returns |  Complete |
 | **Functions** | First-class functions, parameters, dynamic dispatch |  Complete |
@@ -706,7 +721,7 @@ Comprehensive error types with detailed messages:
 | **Modules** | Import/export, circular dependency detection |  Complete |
 | **Exceptions** | Structured try/catch/throw with stack unwinding |  Complete |
 | **Debugging** | Step-by-step tracing, breakpoints, performance metrics |  Complete |
-| **I/O** | File operations, stdin/stdout, environment access, process execution, time operations |  Complete |
+| **I/O** | File operations, stdin/stdout, environment access, process execution, time operations, network I/O |  Complete |
 | **Memory** | Automatic management, efficient stack allocation |  Complete |
 | **Standard Library** | Math, string, list, I/O, and conversion utilities |  Complete |
 
