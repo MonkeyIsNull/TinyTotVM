@@ -451,6 +451,7 @@ pub struct GcStats {
 
 // GC Reference wrapper
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct GcRef {
     id: usize,
     generation: usize,
@@ -622,7 +623,7 @@ struct VM {
     breakpoints: Vec<usize>,
     // Garbage Collection
     gc_engine: Box<dyn GcEngine>,           // Pluggable GC engine
-    gc_stats_enabled: bool,                 // Whether to show GC stats
+    _gc_stats_enabled: bool,                 // Whether to show GC stats
 }
 
 impl VM {
@@ -630,6 +631,7 @@ impl VM {
         Self::new_with_gc(instructions, "mark-sweep", false, false)
     }
 
+    #[allow(dead_code)]
     fn new_with_debug(instructions: Vec<OpCode>, debug_mode: bool) -> Self {
         Self::new_with_gc(instructions, "mark-sweep", debug_mode, false)
     }
@@ -657,7 +659,7 @@ impl VM {
             debug_mode,
             breakpoints: Vec::new(),
             gc_engine,
-            gc_stats_enabled,
+            _gc_stats_enabled: gc_stats_enabled,
         }
     }
 
@@ -682,6 +684,7 @@ impl VM {
         self.gc_engine.stats()
     }
 
+    #[allow(dead_code)]
     fn trigger_gc(&mut self) {
         // Collect roots from stack and variables
         let mut roots: Vec<&Value> = Vec::new();
@@ -1847,8 +1850,8 @@ impl VM {
                     match (timestamp, format_str) {
                         (Value::Int(ts), Value::Str(_format)) => {
                             // Simplified time formatting - just return ISO format
-                            use std::time::{SystemTime, UNIX_EPOCH, Duration};
-                            let system_time = UNIX_EPOCH + Duration::from_secs(ts as u64);
+                            use std::time::{UNIX_EPOCH, Duration};
+                            let _system_time = UNIX_EPOCH + Duration::from_secs(ts as u64);
                             // For simplicity, just return the timestamp as string
                             // In a real implementation, we'd use chrono or similar for formatting
                             self.stack.push(Value::Str(format!("{}", ts)));
@@ -2035,7 +2038,7 @@ impl VM {
                     let size = self.pop_stack("UDP_RECV")?;
                     let socket = self.pop_stack("UDP_RECV")?;
                     match (socket, size) {
-                        (Value::Connection(conn_id), Value::Int(_buffer_size)) => {
+                        (Value::Connection(_conn_id), Value::Int(_buffer_size)) => {
                             // Simplified UDP recv - return mock data and sender info
                             let mut result = HashMap::new();
                             result.insert("data".to_string(), Value::Str("UDP packet data".to_string()));
@@ -2096,12 +2099,12 @@ impl VM {
                     }
                 }
                 OpCode::AsyncWrite => {
-                    let content = self.pop_stack("ASYNC_WRITE")?;
                     let filename = self.pop_stack("ASYNC_WRITE")?;
+                    let content = self.pop_stack("ASYNC_WRITE")?;
                     match (filename, content) {
                         (Value::Str(fname), Value::Str(data)) => {
-                            // Simplified async write
-                            let future_id = format!("async_write:{}:{}", fname, data.len());
+                            // Simplified async write - encode filename and content in future ID
+                            let future_id = format!("async_write:{}:{}", fname, data);
                             self.stack.push(Value::Future(future_id));
                         }
                         (f, c) => return Err(VMError::TypeMismatch { 
@@ -2127,8 +2130,21 @@ impl VM {
                                     }),
                                 }
                             } else if future_id.starts_with("async_write:") {
-                                // Simulate write completion
-                                self.stack.push(Value::Bool(true));
+                                // Parse the async_write future format: "async_write:filename:content"
+                                let content_part = future_id.strip_prefix("async_write:").unwrap_or("");
+                                if let Some(separator_index) = content_part.find(':') {
+                                    let filename = &content_part[..separator_index];
+                                    let data = &content_part[separator_index + 1..];
+                                    match std::fs::write(filename, data) {
+                                        Ok(()) => self.stack.push(Value::Bool(true)),
+                                        Err(e) => return Err(VMError::FileError { 
+                                            filename: filename.to_string(), 
+                                            error: e.to_string() 
+                                        }),
+                                    }
+                                } else {
+                                    self.stack.push(Value::Bool(true));
+                                }
                             } else {
                                 self.stack.push(Value::Null);
                             }
@@ -2158,7 +2174,7 @@ impl VM {
                     let size = self.pop_stack("STREAM_READ")?;
                     let stream = self.pop_stack("STREAM_READ")?;
                     match (stream, size) {
-                        (Value::Stream(stream_id), Value::Int(read_size)) => {
+                        (Value::Stream(_stream_id), Value::Int(read_size)) => {
                             // Simplified stream read
                             let data = format!("stream_data_{}", read_size);
                             self.stack.push(Value::Str(data));
@@ -2419,7 +2435,7 @@ impl VM {
                     let query = self.pop_stack("DB_QUERY")?;
                     let db = self.pop_stack("DB_QUERY")?;
                     match (db, query) {
-                        (Value::Connection(db_id), Value::Str(sql_query)) => {
+                        (Value::Connection(_db_id), Value::Str(_sql_query)) => {
                             // Simplified database query
                             let mut result = HashMap::new();
                             result.insert("rows".to_string(), Value::Int(3));
@@ -3097,6 +3113,250 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
     std::fs::write(output_file, output)
 }
 
+fn run_comprehensive_tests() {
+    use std::path::Path;
+    use std::io::Write;
+    
+    println!("=== TinyTotVM Comprehensive Test Suite ===");
+    println!();
+    
+    // List of test files to run
+    let test_files = vec![
+        // Core functionality tests
+        ("showcase.ttvm", "Basic VM showcase"),
+        ("float_test.ttvm", "Float operations"),
+        ("object_test.ttvm", "Object manipulation"),
+        ("list_test.ttvm", "List operations"),
+        ("string_utils.ttvm", "String utilities"),
+        ("variables.ttvm", "Variable operations"),
+        ("null_test.ttvm", "Null handling"),
+        ("bool_test.ttvm", "Boolean operations"),
+        ("coercion_test.ttvm", "Type coercion"),
+        ("comparison.ttvm", "Comparison operations"),
+        ("comparison-le.ttvm", "Less-than-equal comparison"),
+        
+        // Function and closure tests
+        ("function_test.ttvm", "Basic functions"),
+        ("function_args_test.ttvm", "Function arguments"),
+        ("function_pointer_test.ttvm", "Function pointers"),
+        ("higher_order_test.ttvm", "Higher-order functions"),
+        ("call_test.ttvm", "Function calls"),
+        ("scoped_call.ttvm", "Scoped function calls"),
+        ("closure_test.ttvm", "Closures"),
+        ("simple_closure_test.ttvm", "Simple closures"),
+        ("nested_closure_test.ttvm", "Nested closures"),
+        ("lambda_test.ttvm", "Lambda functions"),
+        
+        // Module system tests
+        ("module_test.ttvm", "Basic modules"),
+        ("comprehensive_module_test.ttvm", "Advanced modules"),
+        ("closure_module_test.ttvm", "Module closures"),
+        ("complex_closure_test.ttvm", "Complex closures"),
+        
+        // Exception handling tests
+        ("exception_test.ttvm", "Exception handling"),
+        ("function_exception_test.ttvm", "Function exceptions"),
+        ("nested_exception_test.ttvm", "Nested exceptions"),
+        ("vm_error_exception_test.ttvm", "VM error exceptions"),
+        
+        // Standard library tests
+        ("stdlib_test.ttvm", "Standard library - math"),
+        ("stdlib_string_test.ttvm", "Standard library - strings"),
+        ("stdlib_prelude_test.ttvm", "Standard library - prelude"),
+        ("stdlib_comprehensive_test.ttvm", "Standard library - comprehensive"),
+        ("stdlib_enhanced_io_test.ttvm", "Standard library - enhanced I/O"),
+        ("stdlib_network_test.ttvm", "Standard library - network"),
+        ("stdlib_advanced_test.ttvm", "Standard library - advanced"),
+        
+        // I/O tests
+        ("io_simple_test.ttvm", "Simple I/O"),
+        ("io_comprehensive_test.ttvm", "Comprehensive I/O"),
+        ("advanced_io_test.ttvm", "Advanced I/O"),
+        
+        // Network tests
+        ("network_simple_test.ttvm", "Simple network"),
+        ("network_tcp_test.ttvm", "TCP operations"),
+        ("network_udp_test.ttvm", "UDP operations"),
+        ("network_comprehensive_test.ttvm", "Comprehensive network"),
+        
+        // Optimization tests
+        ("optimization_test.ttvm", "Basic optimization"),
+        ("constant_folding_test.ttvm", "Constant folding"),
+        ("dead_code_test.ttvm", "Dead code elimination"),
+        ("tail_call_test.ttvm", "Tail call optimization"),
+        ("memory_optimization_test.ttvm", "Memory optimization"),
+        ("advanced_optimization_test.ttvm", "Advanced optimization"),
+        ("safe_advanced_optimization_test.ttvm", "Safe advanced optimization"),
+        ("comprehensive_optimization_test.ttvm", "Comprehensive optimization"),
+        ("complete_optimization_showcase.ttvm", "Complete optimization showcase"),
+        
+        // Control flow tests
+        ("if_else.ttvm", "If-else statements"),
+        ("countdown.ttvm", "Countdown loop"),
+        ("countdown_label.ttvm", "Countdown with labels"),
+        ("delete.ttvm", "Delete operations"),
+        ("nested_object_test.ttvm", "Nested objects"),
+        
+        // Additional files
+        ("circular_a.ttvm", "Circular dependency A"),
+        ("circular_b.ttvm", "Circular dependency B"),
+        ("closure_module.ttvm", "Closure module"),
+        ("complex_closure_module.ttvm", "Complex closure module"),
+        ("io_interactive_test.ttvm", "Interactive I/O test"),
+        ("io_test.ttvm", "Basic I/O test"),
+        ("math_module.ttvm", "Math module"),
+        ("program.ttvm", "Basic program"),
+        ("showcase_lisp.ttvm", "Lisp showcase"),
+    ];
+    
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut skipped = 0;
+    
+    let mut results = Vec::new();
+    
+    // Tests that are expected to fail with specific error messages
+    let expected_failures = std::collections::HashMap::from([
+        ("circular_a.ttvm", "Circular dependency detected"),
+        ("circular_b.ttvm", "Circular dependency detected"),
+    ]);
+    
+    for (filename, description) in &test_files {
+        let path = format!("examples/{}", filename);
+        
+        if !Path::new(&path).exists() {
+            println!("SKIP: {} (file not found)", description);
+            skipped += 1;
+            results.push(TestResult {
+                name: description.to_string(),
+                expected: "File exists".to_string(),
+                actual: "File not found".to_string(),
+                passed: false,
+            });
+            continue;
+        }
+        
+        print!("Testing {}: ", description);
+        Write::flush(&mut std::io::stdout()).unwrap();
+        
+        // Parse and run the test
+        match parse_program(&path) {
+            Ok(program) => {
+                let mut vm = VM::new(program);
+                match vm.run() {
+                    Ok(()) => {
+                        // Check if this test was expected to fail
+                        if let Some(expected_error) = expected_failures.get(filename) {
+                            println!("FAIL: Expected error '{}' but test passed", expected_error);
+                            failed += 1;
+                            results.push(TestResult {
+                                name: description.to_string(),
+                                expected: format!("Error: {}", expected_error),
+                                actual: "Success".to_string(),
+                                passed: false,
+                            });
+                        } else {
+                            println!("PASS");
+                            passed += 1;
+                            results.push(TestResult {
+                                name: description.to_string(),
+                                expected: "Success".to_string(),
+                                actual: "Success".to_string(),
+                                passed: true,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        // Check if this is an expected failure
+                        if let Some(expected_error) = expected_failures.get(filename) {
+                            if error_msg.contains(expected_error) {
+                                println!("PASS (Expected failure)");
+                                passed += 1;
+                                results.push(TestResult {
+                                    name: description.to_string(),
+                                    expected: format!("Error: {}", expected_error),
+                                    actual: format!("Error: {}", error_msg),
+                                    passed: true,
+                                });
+                            } else {
+                                println!("FAIL: Expected '{}' but got '{}'", expected_error, error_msg);
+                                failed += 1;
+                                results.push(TestResult {
+                                    name: description.to_string(),
+                                    expected: format!("Error: {}", expected_error),
+                                    actual: format!("Error: {}", error_msg),
+                                    passed: false,
+                                });
+                            }
+                        } else {
+                            println!("FAIL: {}", e);
+                            failed += 1;
+                            results.push(TestResult {
+                                name: description.to_string(),
+                                expected: "Success".to_string(),
+                                actual: format!("Error: {}", e),
+                                passed: false,
+                            });
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                println!("FAIL: Parse error: {}", e);
+                failed += 1;
+                results.push(TestResult {
+                    name: description.to_string(),
+                    expected: "Success".to_string(),
+                    actual: format!("Parse error: {}", e),
+                    passed: false,
+                });
+            }
+        }
+    }
+    
+    println!();
+    println!("=== Test Summary ===");
+    
+    // Create a table for the summary
+    let mut table = Table::new();
+    table.load_preset(UTF8_FULL);
+    table.set_header(vec!["Result", "Count"]);
+    
+    table.add_row(vec![
+        Cell::new("Passed"),
+        Cell::new(&passed.to_string()),
+    ]);
+    table.add_row(vec![
+        Cell::new("Failed"),
+        Cell::new(&failed.to_string()),
+    ]);
+    table.add_row(vec![
+        Cell::new("Skipped"),
+        Cell::new(&skipped.to_string()),
+    ]);
+    table.add_row(vec![
+        Cell::new("Total"),
+        Cell::new(&(passed + failed + skipped).to_string()),
+    ]);
+    
+    println!("{table}");
+    
+    if failed > 0 {
+        println!();
+        println!("Failed Tests:");
+        for result in &results {
+            if !result.passed {
+                println!("   - {}: {}", result.name, result.actual);
+            }
+        }
+        std::process::exit(1);
+    } else {
+        println!();
+        println!("All tests passed!");
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -3105,6 +3365,7 @@ fn main() {
         eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
         eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
         eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
+        eprintln!("       ttvm test-all                                    # Run all examples and tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
@@ -3200,6 +3461,10 @@ fn main() {
                 let output = &args[file_index + 2];
                 lisp_compiler::compile_lisp(input, output);
                 println!("Compiled Lisp to {}", output);
+                return;
+            }
+            "test-all" => {
+                run_comprehensive_tests();
                 return;
             }
             _ => {

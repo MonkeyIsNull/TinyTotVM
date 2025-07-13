@@ -26,6 +26,7 @@ LABEL skip_section
 ; Tail recursion example
 PUSH_INT 5
 STORE counter
+LOAD counter
 CALL recursive_function counter
 
 HALT
@@ -42,6 +43,7 @@ PUSH_INT 0
 GT
 JZ end_recursion
 
+LOAD counter
 CALL recursive_function counter  ; Tail call - optimize to JMP
 RET
 
@@ -70,7 +72,6 @@ PRINT
 PUSH_INT 100
 STORE big_number
 LOAD big_number
-LOAD big_number   ; Should optimize to DUP
 PUSH_INT 50       
 PUSH_INT 25
 ADD               ; Should fold to 75

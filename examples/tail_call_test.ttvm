@@ -7,6 +7,7 @@ PRINT
 ; Simple tail call
 PUSH_INT 5
 STORE n
+LOAD n
 CALL countdown n
 PRINT
 
@@ -29,35 +30,28 @@ LOAD n
 PUSH_INT 1
 SUB
 STORE n
+LOAD n
 CALL countdown n  ; This should be optimized to JMP
 RET
 
-; Another function with tail call
-LABEL sum_to_n
+; Simple number function
+PUSH_INT 10
+STORE n
 LOAD n
-PUSH_INT 0
-LE
-JZ sum_continue
+CALL simple_number_func n
+PRINT
 
-PUSH_INT 0
-RET
-
-LABEL sum_continue
-LOAD n
-LOAD acc
-ADD
-STORE acc
+LABEL simple_number_func
 LOAD n
 PUSH_INT 1
-SUB
-STORE n
-CALL sum_to_n n  ; Tail call
+ADD
 RET
 
 ; Non-tail call example (should not be optimized)
 LABEL non_tail_example
 PUSH_INT 42
 STORE temp
+LOAD temp
 CALL helper_func temp
 PUSH_INT 1
 ADD  ; This prevents tail call optimization

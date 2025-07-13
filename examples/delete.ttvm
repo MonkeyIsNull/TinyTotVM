@@ -6,7 +6,21 @@ PRINT
 
 DELETE secret
 
-LOAD secret     ; should panic or error here
+; Test that variable is deleted by using exception handling
+TRY delete_catch
+LOAD secret     ; should error here
+PRINT
+JMP delete_end
+
+LABEL delete_catch
+CATCH
+STORE error
+PUSH_STR "Variable successfully deleted"
+PRINT
+END_TRY
+
+LABEL delete_end
+PUSH_STR "Delete test complete"
 PRINT
 
 HALT

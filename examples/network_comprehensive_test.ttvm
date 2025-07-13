@@ -34,7 +34,7 @@ PUSH_STR "--- TCP Operations ---"
 PRINT
 
 ; Try to connect to a common service (will likely fail but demonstrates usage)
-TRY
+TRY tcp_catch1
     PUSH_STR "google.com"
     PUSH_INT 80
     TCP_CONNECT
@@ -54,19 +54,24 @@ TRY
     PUSH_INT 1024
     TCP_RECV
     PRINT
+JMP tcp_end1
 
-CATCH error
+LABEL tcp_catch1
+CATCH
+STORE error
     PUSH_STR "TCP connection failed (expected): "
     LOAD error
     CONCAT
     PRINT
 END_TRY
 
+LABEL tcp_end1
+
 ; Test 4: TCP Listener (will bind to available port)
 PUSH_STR "--- TCP Listener ---"
 PRINT
 
-TRY
+TRY tcp_catch2
     PUSH_INT 0  ; Use port 0 to get any available port
     TCP_LISTEN
     STORE tcp_listener
@@ -75,19 +80,24 @@ TRY
     PRINT
     LOAD tcp_listener
     PRINT
+JMP tcp_end2
 
-CATCH error
+LABEL tcp_catch2
+CATCH
+STORE error
     PUSH_STR "TCP listen failed: "
     LOAD error
     CONCAT
     PRINT
 END_TRY
 
+LABEL tcp_end2
+
 ; Test 5: UDP Operations
 PUSH_STR "--- UDP Operations ---"
 PRINT
 
-TRY
+TRY udp_catch1
     PUSH_INT 0  ; Use port 0 to get any available port
     UDP_BIND
     STORE udp_socket
@@ -110,13 +120,18 @@ TRY
     PUSH_INT 1024
     UDP_RECV
     PRINT
+JMP udp_end1
 
-CATCH error
+LABEL udp_catch1
+CATCH
+STORE error
     PUSH_STR "UDP operations failed: "
     LOAD error
     CONCAT
     PRINT
 END_TRY
+
+LABEL udp_end1
 
 PUSH_STR "=== Network I/O Test Complete ==="
 PRINT
