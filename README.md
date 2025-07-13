@@ -30,6 +30,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 TinyTotVM is a **toy virtual machine** with features found in modern programming languages:
 
 - **Pluggable Garbage Collection** - Multiple GC engines with runtime selection (Mark & Sweep, No-GC)
+- **Formatted Output & Testing** - Beautiful diagnostic tables with plain text fallback for automation
 
 - **9 Built-in Data Types** - Complete type system with automatic memory management
 - **55+ Core Instructions** - Full instruction set for all programming paradigms  
@@ -74,6 +75,40 @@ TinyTotVM features a **pluggable garbage collection architecture** allowing runt
 - **Performance Statistics** - Track allocations, collections, and memory usage with `--gc-stats`
 - **Root Set Marking** - Automatic detection of reachable objects from stack and variables
 - **Transparent Integration** - GC operations are invisible to VM programs
+
+### **Formatted Output & Testing**
+```bash
+# Built-in unit testing with beautiful table output
+ttvm --run-tests
+
+# GC statistics with formatted tables
+ttvm --gc-stats examples/program.ttvm
+
+# Plain text output for scripts and automation
+ttvm --run-tests --no-table
+ttvm --gc-stats --no-table examples/program.ttvm
+```
+
+TinyTotVM features **structured output formatting** for diagnostic and testing information:
+
+**Output Modes:**
+- **Pretty Tables** - Beautiful formatted tables using Unicode box drawing (default)
+- **Plain Text** - Simple text output suitable for parsing and automation via `--no-table`
+
+**Testing Features:**
+- **Built-in Unit Tests** - Comprehensive VM functionality tests with `--run-tests`
+- **Formatted Test Results** - Table showing test name, expected/actual values, and pass/fail status
+- **Test Coverage** - Arithmetic operations, string manipulation, variable storage, and more
+
+**Diagnostic Output:**
+- **GC Statistics Tables** - Memory allocation metrics in tabular format
+- **Debug Information** - Structured display of internal VM state during debugging
+- **Performance Metrics** - Clear presentation of optimization and runtime statistics
+
+**Key Principles:**
+- **Clean Program Output** - Normal program execution produces no diagnostic tables
+- **Conditional Formatting** - Tables only appear with explicit diagnostic flags (`--run-tests`, `--gc-debug`, `--gc-stats`)
+- **Automation Friendly** - `--no-table` ensures plain text output for scripts and CI/CD pipelines
 
 ### **Advanced Data Types**
 - **64-bit Integers** - Full arithmetic and comparison operations
@@ -664,6 +699,11 @@ ttvm --gc-stats examples/program.ttvm               # Show GC statistics
 
 # Combined flags
 ttvm --debug --optimize --gc-stats examples/program.ttvm
+
+# Unit testing and formatted output
+ttvm --run-tests                                     # Run built-in unit tests with table output
+ttvm --run-tests --no-table                         # Run tests with plain text output
+ttvm --gc-stats --no-table examples/program.ttvm    # GC stats in plain text format
 
 # Optimize and save program
 ttvm optimize input.ttvm optimized.ttvm
