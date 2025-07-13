@@ -1,0 +1,32 @@
+; Simple Profiling and Tracing Test
+
+PUSH_STR "=== Simple Profiling Test ===" 
+PRINT
+
+; Test simple function
+PUSH_INT 10
+PUSH_INT 5
+CALL add_function a b
+PRINT
+
+; Test another function
+PUSH_STR "Hello"
+PUSH_STR " World"
+CALL concat_function str1 str2
+PRINT
+
+HALT
+
+; Function: add_function
+LABEL add_function
+LOAD a
+LOAD b
+ADD
+RET
+
+; Function: concat_function  
+LABEL concat_function
+LOAD str1
+LOAD str2
+CONCAT
+RET
