@@ -1,10 +1,195 @@
 use std::collections::HashMap;
 use std::fs;
 use std::fmt;
+use comfy_table::{Table, Cell, presets::UTF8_FULL};
 mod bytecode;
 mod compiler;
 mod lisp_compiler;
 mod optimizer;
+
+#[derive(Clone, Copy, Debug)]
+pub enum OutputMode {
+    PrettyTable,
+    Plain,
+}
+
+#[derive(Clone, Debug)]
+pub struct VMConfig {
+    pub output_mode: OutputMode,
+    pub run_tests: bool,
+    pub gc_debug: bool,
+    pub gc_stats: bool,
+    pub debug_mode: bool,
+    pub optimize_mode: bool,
+    pub gc_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestResult {
+    pub name: String,
+    pub expected: String,
+    pub actual: String,
+    pub passed: bool,
+}
+
+fn run_vm_tests(config: &VMConfig) {
+    if !config.run_tests {
+        return;
+    }
+
+    let mut results = Vec::new();
+    
+    // Test 1: Basic arithmetic
+    let program = vec![
+        OpCode::PushInt(5),
+        OpCode::PushInt(3),
+        OpCode::Add,
+        OpCode::Halt,
+    ];
+    let mut vm = VM::new(program);
+    if vm.run().is_ok() && vm.stack.len() == 1 {
+        let result = format!("{}", vm.stack[0]);
+        results.push(TestResult {
+            name: "Basic addition".to_string(),
+            expected: "8".to_string(),
+            actual: result.clone(),
+            passed: result == "8",
+        });
+    } else {
+        results.push(TestResult {
+            name: "Basic addition".to_string(),
+            expected: "8".to_string(),
+            actual: "ERROR".to_string(),
+            passed: false,
+        });
+    }
+
+    // Test 2: String concatenation
+    let program = vec![
+        OpCode::PushStr("Hello".to_string()),
+        OpCode::PushStr(" World".to_string()),
+        OpCode::Concat,
+        OpCode::Halt,
+    ];
+    let mut vm = VM::new(program);
+    if vm.run().is_ok() && vm.stack.len() == 1 {
+        let result = format!("{}", vm.stack[0]);
+        results.push(TestResult {
+            name: "String concat".to_string(),
+            expected: "Hello World".to_string(),
+            actual: result.clone(),
+            passed: result == "Hello World",
+        });
+    } else {
+        results.push(TestResult {
+            name: "String concat".to_string(),
+            expected: "Hello World".to_string(),
+            actual: "ERROR".to_string(),
+            passed: false,
+        });
+    }
+
+    // Test 3: Variable storage and retrieval
+    let program = vec![
+        OpCode::PushInt(42),
+        OpCode::Store("x".to_string()),
+        OpCode::Load("x".to_string()),
+        OpCode::Halt,
+    ];
+    let mut vm = VM::new(program);
+    if vm.run().is_ok() && vm.stack.len() == 1 {
+        let result = format!("{}", vm.stack[0]);
+        results.push(TestResult {
+            name: "Variable store/load".to_string(),
+            expected: "42".to_string(),
+            actual: result.clone(),
+            passed: result == "42",
+        });
+    } else {
+        results.push(TestResult {
+            name: "Variable store/load".to_string(),
+            expected: "42".to_string(),
+            actual: "ERROR".to_string(),
+            passed: false,
+        });
+    }
+
+    report_test_results(&results, config);
+}
+
+fn report_test_results(results: &[TestResult], config: &VMConfig) {
+    match config.output_mode {
+        OutputMode::PrettyTable => {
+            let mut table = Table::new();
+            table.load_preset(UTF8_FULL);
+            table.set_header(vec!["Test", "Expected", "Actual", "Result"]);
+
+            for r in results {
+                let status = if r.passed { "PASS" } else { "FAIL" };
+                table.add_row(vec![
+                    Cell::new(&r.name),
+                    Cell::new(&r.expected),
+                    Cell::new(&r.actual),
+                    Cell::new(status),
+                ]);
+            }
+
+            println!("=== Unit Test Results ===");
+            println!("{table}");
+        }
+        OutputMode::Plain => {
+            println!("=== Unit Test Results ===");
+            for r in results {
+                let status = if r.passed { "PASS" } else { "FAIL" };
+                println!(
+                    "{} | expected: {} | actual: {} | {}",
+                    r.name, r.expected, r.actual, status
+                );
+            }
+        }
+    }
+
+    let passed = results.iter().filter(|r| r.passed).count();
+    let total = results.len();
+    println!("Tests passed: {}/{}", passed, total);
+}
+
+fn report_gc_stats(stats: &GcStats, config: &VMConfig) {
+    match config.output_mode {
+        OutputMode::PrettyTable => {
+            let mut table = Table::new();
+            table.load_preset(UTF8_FULL);
+            table.set_header(vec!["Metric", "Value"]);
+
+            table.add_row(vec![
+                Cell::new("Total Allocated"),
+                Cell::new(&stats.total_allocated.to_string()),
+            ]);
+            table.add_row(vec![
+                Cell::new("Total Freed"),
+                Cell::new(&stats.total_freed.to_string()),
+            ]);
+            table.add_row(vec![
+                Cell::new("Currently Allocated"),
+                Cell::new(&stats.current_allocated.to_string()),
+            ]);
+            table.add_row(vec![
+                Cell::new("Collections Performed"),
+                Cell::new(&stats.collections_performed.to_string()),
+            ]);
+
+            println!("=== GC Statistics ===");
+            println!("{table}");
+        }
+        OutputMode::Plain => {
+            println!("=== GC Statistics ===");
+            println!("Total allocated: {}", stats.total_allocated);
+            println!("Total freed: {}", stats.total_freed);
+            println!("Currently allocated: {}", stats.current_allocated);
+            println!("Collections performed: {}", stats.collections_performed);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum VMError {
@@ -2916,12 +3101,14 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] <program.ttvm|program.ttb>");
+        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] <program.ttvm|program.ttb>");
         eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
         eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
         eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
+        eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
+        eprintln!("Table Control: --no-table disables formatted output in favor of plain text");
         std::process::exit(1);
     }
 
@@ -2930,6 +3117,8 @@ fn main() {
     let mut gc_type = "mark-sweep";
     let mut gc_debug = false;
     let mut gc_stats = false;
+    let mut run_tests = false;
+    let mut no_table = false;
     let mut file_index = 1;
 
     // Check for flags
@@ -2961,6 +3150,14 @@ fn main() {
             }
             "--gc-stats" => {
                 gc_stats = true;
+                file_index += 1;
+            }
+            "--run-tests" => {
+                run_tests = true;
+                file_index += 1;
+            }
+            "--no-table" => {
+                no_table = true;
                 file_index += 1;
             }
             _ => {
@@ -3009,6 +3206,35 @@ fn main() {
                 // Normal execution, continue below
             }
         }
+    }
+
+    // Create VM configuration early
+    let output_mode = if no_table {
+        OutputMode::Plain
+    } else {
+        OutputMode::PrettyTable
+    };
+
+    let config = VMConfig {
+        output_mode,
+        run_tests,
+        gc_debug,
+        gc_stats,
+        debug_mode,
+        optimize_mode,
+        gc_type: gc_type.to_string(),
+    };
+
+    // Run unit tests if requested (no program file needed)
+    if config.run_tests {
+        run_vm_tests(&config);
+        return; // Exit after running tests
+    }
+
+    // Check if we have a program file for normal execution
+    if file_index >= args.len() {
+        eprintln!("No program file specified");
+        std::process::exit(1);
     }
 
     // Normal execution
@@ -3064,10 +3290,6 @@ fn main() {
     
     if gc_stats {
         let stats = vm.get_gc_stats();
-        println!("=== GC Statistics ===");
-        println!("Total allocated: {}", stats.total_allocated);
-        println!("Total freed: {}", stats.total_freed);
-        println!("Currently allocated: {}", stats.current_allocated);
-        println!("Collections performed: {}", stats.collections_performed);
+        report_gc_stats(&stats, &config);
     }
 }
