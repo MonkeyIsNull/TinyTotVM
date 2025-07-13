@@ -29,6 +29,8 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 
 TinyTotVM is a **toy virtual machine** with features found in modern programming languages:
 
+- **Pluggable Garbage Collection** - Multiple GC engines with runtime selection (Mark & Sweep, No-GC)
+
 - **9 Built-in Data Types** - Complete type system with automatic memory management
 - **55+ Core Instructions** - Full instruction set for all programming paradigms  
 - **100+ Standard Library Functions** - Math, string, list, I/O, and conversion utilities
@@ -47,6 +49,31 @@ TinyTotVM is a **toy virtual machine** with features found in modern programming
 - **Type Coercion** - Automatic conversion between compatible types (int <-> float)
 - **Memory Management** - Automatic cleanup via Rust's ownership system
 - **Error Handling** - Comprehensive Result-based error system instead of crashes
+
+### **Pluggable Garbage Collection**
+```bash
+# Select garbage collector at runtime
+ttvm --gc mark-sweep examples/program.ttvm          # Mark & Sweep GC (default)
+ttvm --gc no-gc examples/program.ttvm               # No garbage collection
+
+# GC debugging and statistics
+ttvm --gc-debug examples/program.ttvm               # Show allocation/collection debug info
+ttvm --gc-stats examples/program.ttvm               # Display GC performance statistics
+```
+
+TinyTotVM features a **pluggable garbage collection architecture** allowing runtime selection of memory management strategies:
+
+**Available GC Engines:**
+- **Mark & Sweep GC** - Traditional mark-and-sweep garbage collector with automatic memory reclamation
+- **No-GC** - Disable garbage collection for performance testing and comparison
+- **Future: Reference Counting** - Planned addition for immediate cleanup scenarios
+
+**GC Features:**
+- **Runtime Selection** - Choose GC engine via command-line flags without recompilation
+- **Debug Mode** - Detailed allocation and collection logging with `--gc-debug`
+- **Performance Statistics** - Track allocations, collections, and memory usage with `--gc-stats`
+- **Root Set Marking** - Automatic detection of reachable objects from stack and variables
+- **Transparent Integration** - GC operations are invisible to VM programs
 
 ### **Advanced Data Types**
 - **64-bit Integers** - Full arithmetic and comparison operations
@@ -177,10 +204,10 @@ CALL_FUNCTION          ; Outputs: sum of elements
 ### **Advanced Optimization Engine**
 ```bash
 # Run with optimizations enabled
-cargo run -- --optimize examples/program.ttvm
+ttvm --optimize examples/program.ttvm
 
 # Optimize and save program
-cargo run -- optimize input.ttvm optimized.ttvm
+ttvm optimize input.ttvm optimized.ttvm
 ```
 TinyTotVM features a sophisticated 8-pass optimization engine that provides significant performance improvements:
 
@@ -208,7 +235,7 @@ TinyTotVM features a sophisticated 8-pass optimization engine that provides sign
 
 ### **Performance & Debugging**
 ```bash
-cargo run -- --debug examples/program.ttvm
+ttvm --debug examples/program.ttvm
 ```
 - **Debug Mode** - Step-by-step execution tracing with `--debug` flag
 - **Performance Stats** - Instruction count, max stack usage, memory tracking
@@ -495,74 +522,74 @@ TinyTotVM includes extensive test suites to verify all functionality. Run these 
 ### **Core VM Tests**
 ```bash
 # Basic functionality tests
-cargo run examples/showcase.ttvm
-cargo run examples/float_test.ttvm
-cargo run examples/object_test.ttvm
+ttvm examples/showcase.ttvm
+ttvm examples/float_test.ttvm
+ttvm examples/object_test.ttvm
 
 # Function and closure tests  
-cargo run examples/function_pointer_test.ttvm
-cargo run examples/closure_test.ttvm
-cargo run examples/nested_closure_test.ttvm
+ttvm examples/function_pointer_test.ttvm
+ttvm examples/closure_test.ttvm
+ttvm examples/nested_closure_test.ttvm
 
 # Module system tests
-cargo run examples/module_test.ttvm
-cargo run examples/comprehensive_module_test.ttvm
-cargo run examples/closure_module_test.ttvm
+ttvm examples/module_test.ttvm
+ttvm examples/comprehensive_module_test.ttvm
+ttvm examples/closure_module_test.ttvm
 
 # Exception handling tests
-cargo run examples/exception_test.ttvm
+ttvm examples/exception_test.ttvm
 ```
 
 ### **Standard Library Tests**
 ```bash
 # Individual library tests
-cargo run examples/stdlib_test.ttvm
-cargo run examples/stdlib_string_test.ttvm
-cargo run examples/stdlib_prelude_test.ttvm
+ttvm examples/stdlib_test.ttvm
+ttvm examples/stdlib_string_test.ttvm
+ttvm examples/stdlib_prelude_test.ttvm
 
 # Comprehensive standard library test
-cargo run examples/stdlib_comprehensive_test.ttvm
+ttvm examples/stdlib_comprehensive_test.ttvm
 ```
 
 ### **Optimization Engine Tests**
 ```bash
 # Basic optimizations
-cargo run -- --optimize examples/constant_folding_test.ttvm
-cargo run -- --optimize examples/dead_code_test.ttvm
-cargo run -- --optimize examples/tail_call_test.ttvm
+ttvm --optimize examples/constant_folding_test.ttvm
+ttvm --optimize examples/dead_code_test.ttvm
+ttvm --optimize examples/tail_call_test.ttvm
 
 # Advanced optimizations
-cargo run -- --optimize examples/advanced_optimization_test.ttvm
-cargo run -- --optimize examples/safe_advanced_optimization_test.ttvm
+ttvm --optimize examples/advanced_optimization_test.ttvm
+ttvm --optimize examples/safe_advanced_optimization_test.ttvm
 
 # Complete optimization showcase
-cargo run -- --optimize examples/complete_optimization_showcase.ttvm
+ttvm --optimize examples/complete_optimization_showcase.ttvm
 
 # Save optimized programs
-cargo run -- optimize examples/constant_folding_test.ttvm /tmp/optimized.ttvm
-cargo run /tmp/optimized.ttvm
+ttvm optimize examples/constant_folding_test.ttvm /tmp/optimized.ttvm
+ttvm /tmp/optimized.ttvm
 ```
 
 ### **Debug and Analysis**
 ```bash
 # Debug mode with step-by-step tracing
-cargo run -- --debug examples/showcase.ttvm
+ttvm --debug examples/showcase.ttvm
 
 # Combined debug and optimization
-cargo run -- --debug --optimize examples/program.ttvm
+ttvm --debug --optimize examples/program.ttvm
 
 # Optimization analysis only
-cargo run -- optimize examples/program.ttvm /tmp/optimized.ttvm
+ttvm optimize examples/program.ttvm /tmp/optimized.ttvm
 ```
 
 ### **Performance Benchmarks**
 ```bash
 # Compare performance with and without optimizations
-time cargo run examples/comprehensive_optimization_test.ttvm
-time cargo run -- --optimize examples/comprehensive_optimization_test.ttvm
+time ttvm examples/comprehensive_optimization_test.ttvm
+time ttvm --optimize examples/comprehensive_optimization_test.ttvm
 
 # Large program optimization
-time cargo run -- --optimize examples/stdlib_comprehensive_test.ttvm
+time ttvm --optimize examples/stdlib_comprehensive_test.ttvm
 ```
 
 ### **Expected Results**
@@ -583,53 +610,85 @@ Jumps threaded: 0
 ### **Validation Commands**
 ```bash
 # Run all core tests
-for test in examples/*.ttvm; do echo "Testing $test"; cargo run "$test" || echo "FAILED: $test"; done
+for test in examples/*.ttvm; do echo "Testing $test"; ttvm "$test" || echo "FAILED: $test"; done
 
 # Run all optimization tests  
-for test in examples/*optimization*.ttvm; do echo "Optimizing $test"; cargo run -- --optimize "$test" || echo "FAILED: $test"; done
+for test in examples/*optimization*.ttvm; do echo "Optimizing $test"; ttvm --optimize "$test" || echo "FAILED: $test"; done
 
 # Comprehensive validation
-cargo run examples/showcase.ttvm && \
-cargo run examples/stdlib_comprehensive_test.ttvm && \
-cargo run -- --optimize examples/complete_optimization_showcase.ttvm && \
+ttvm examples/showcase.ttvm && \
+ttvm examples/stdlib_comprehensive_test.ttvm && \
+ttvm --optimize examples/complete_optimization_showcase.ttvm && \
 echo "All tests passed!"
 ```
 
 ## Getting Started
 
-### **Installation**
+### **Installation & Building**
 ```bash
 git clone https://github.com/MonkeyIsNull/TinyTotVM
 cd TinyTotVM
 cargo build --release
 ```
 
+After building, the `ttvm` binary will be available at `target/release/ttvm`. You can add it to your PATH or use the full path.
+
+### **Using ttvm**
+```bash
+# Add to PATH (recommended)
+export PATH=$PATH:$(pwd)/target/release
+
+# Or create an alias
+alias ttvm="$(pwd)/target/release/ttvm"
+
+# Or use the full path
+./target/release/ttvm examples/program.ttvm
+```
+
 ### **Running Programs**
 ```bash
 # Execute assembly directly
-cargo run examples/program.ttvm
+ttvm examples/program.ttvm
 
 # Debug mode with step-by-step tracing
-cargo run -- --debug examples/program.ttvm
+ttvm --debug examples/program.ttvm
 
 # Run with optimizations enabled
-cargo run -- --optimize examples/program.ttvm
+ttvm --optimize examples/program.ttvm
+
+# Garbage collection options
+ttvm --gc mark-sweep examples/program.ttvm          # Default GC
+ttvm --gc no-gc examples/program.ttvm               # Disable GC
+ttvm --gc-debug examples/program.ttvm               # Show GC debug info
+ttvm --gc-stats examples/program.ttvm               # Show GC statistics
+
+# Combined flags
+ttvm --debug --optimize --gc-stats examples/program.ttvm
 
 # Optimize and save program
-cargo run -- optimize input.ttvm optimized.ttvm
+ttvm optimize input.ttvm optimized.ttvm
 
 # Compile to bytecode and run
-cargo run -- compile examples/program.ttvm program.ttb
-cargo run program.ttb
+ttvm compile examples/program.ttvm program.ttb
+ttvm program.ttb
 ```
 
 ### **Lisp Interoperability**
 ```bash
 # Compile Lisp to TinyTotVM assembly
-cargo run -- compile-lisp examples/program.lisp program.ttvm
+ttvm compile-lisp examples/program.lisp program.ttvm
 
 # Run the compiled assembly
-cargo run program.ttvm
+ttvm program.ttvm
+```
+
+### **Quick Test**
+```bash
+# Test your installation
+ttvm examples/showcase.ttvm
+
+# Test with GC stats
+ttvm --gc-stats examples/showcase.ttvm
 ```
 
 ## Performance Features
