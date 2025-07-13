@@ -21,7 +21,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 - **Debugging**: Step-by-step execution tracing, performance metrics, profiling support
 - **Performance**: Pre-allocated stacks, instruction counting, advanced optimization engine
 - **Pluggable GC**: Multiple garbage collection engines with runtime selection
-- **Testing**: 67 comprehensive tests with beautiful formatted output
+- **Testing**: 67 comprehensive tests with prettified formatted output
 
 ## Quick Start
 
