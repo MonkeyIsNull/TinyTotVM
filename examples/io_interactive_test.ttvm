@@ -1,0 +1,35 @@
+; Interactive I/O test - demonstrates stdin operations
+; Note: This test is commented out since it requires interactive input
+; To test manually, uncomment the sections below and run with manual input
+
+PUSH_STR "=== Interactive I/O Test ==="
+PRINT
+
+PUSH_STR "This test demonstrates stdin operations but is non-interactive"
+PRINT
+
+; Uncomment these lines to test interactively:
+; PUSH_STR "Enter a line: "
+; PRINT
+; READ_LINE
+; PUSH_STR "You entered: "
+; PRINT
+; PRINT
+
+; Test non-interactive operations
+PUSH_STR "Testing GET_TIME operation..."
+PRINT
+GET_TIME
+PRINT
+
+PUSH_STR "Testing SLEEP operation (500ms)..."
+PRINT
+PUSH_INT 500
+SLEEP
+PUSH_STR "Sleep completed!"
+PRINT
+
+PUSH_STR "=== Interactive Test Complete ==="
+PRINT
+
+HALT

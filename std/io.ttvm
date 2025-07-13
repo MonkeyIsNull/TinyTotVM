@@ -11,8 +11,8 @@ RET
 
 ; Write to file (wrapper around built-in WRITE_FILE)
 LABEL write_file_func
-LOAD filename
 LOAD content
+LOAD filename
 WRITE_FILE
 RET
 
@@ -100,6 +100,76 @@ CONCAT
 PRINT
 RET
 
+; Enhanced I/O functions using new opcodes
+; Read line from stdin
+LABEL read_line_func
+READ_LINE
+RET
+
+; Read character from stdin
+LABEL read_char_func
+READ_CHAR
+RET
+
+; Read all input from stdin
+LABEL read_input_func
+READ_INPUT
+RET
+
+; Check if file exists
+LABEL file_exists_func
+LOAD filename
+FILE_EXISTS
+RET
+
+; Get file size
+LABEL file_size_func
+LOAD filename
+FILE_SIZE
+RET
+
+; Append to file
+LABEL append_file_func
+LOAD content
+LOAD filename
+APPEND_FILE
+RET
+
+; List directory contents
+LABEL list_dir_func
+LOAD dirname
+LIST_DIR
+RET
+
+; Get environment variable
+LABEL get_env_func
+LOAD var_name
+GET_ENV
+RET
+
+; Set environment variable
+LABEL set_env_func
+LOAD var_name
+LOAD value
+SET_ENV
+RET
+
+; Get command line arguments
+LABEL get_args_func
+GET_ARGS
+RET
+
+; Get current timestamp
+LABEL get_time_func
+GET_TIME
+RET
+
+; Sleep for specified milliseconds
+LABEL sleep_func
+LOAD millis
+SLEEP
+RET
+
 LABEL main
 
 ; Export file operations
@@ -153,5 +223,54 @@ EXPORT log_info
 MAKE_FUNCTION log_debug_func message
 STORE log_debug
 EXPORT log_debug
+
+; Export enhanced I/O functions
+MAKE_FUNCTION read_line_func
+STORE read_line
+EXPORT read_line
+
+MAKE_FUNCTION read_char_func
+STORE read_char
+EXPORT read_char
+
+MAKE_FUNCTION read_input_func
+STORE read_input
+EXPORT read_input
+
+MAKE_FUNCTION file_exists_func filename
+STORE file_exists
+EXPORT file_exists
+
+MAKE_FUNCTION file_size_func filename
+STORE file_size
+EXPORT file_size
+
+MAKE_FUNCTION append_file_func filename content
+STORE append_file
+EXPORT append_file
+
+MAKE_FUNCTION list_dir_func dirname
+STORE list_dir
+EXPORT list_dir
+
+MAKE_FUNCTION get_env_func var_name
+STORE get_env
+EXPORT get_env
+
+MAKE_FUNCTION set_env_func var_name value
+STORE set_env
+EXPORT set_env
+
+MAKE_FUNCTION get_args_func
+STORE get_args
+EXPORT get_args
+
+MAKE_FUNCTION get_time_func
+STORE get_time
+EXPORT get_time
+
+MAKE_FUNCTION sleep_func millis
+STORE sleep
+EXPORT sleep
 
 HALT

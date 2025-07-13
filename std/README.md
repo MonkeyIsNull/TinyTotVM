@@ -193,6 +193,10 @@ PRINT  ; Outputs: false (simplified implementation)
 **File Operations:**
 - `read_file(filename)` - Read file contents
 - `write_file(filename, content)` - Write content to file
+- `append_file(filename, content)` - Append content to file
+- `file_exists(filename)` - Check if file exists
+- `file_size(filename)` - Get file size in bytes
+- `list_dir(dirname)` - List directory contents
 
 **Printing:**
 - `println(value)` - Print with newline
@@ -209,6 +213,18 @@ PRINT  ; Outputs: false (simplified implementation)
 - `log_info(message)` - Log info message
 - `log_error(message)` - Log error message  
 - `log_debug(message)` - Log debug message
+
+**Interactive I/O:**
+- `read_line()` - Read line from stdin
+- `read_char()` - Read single character from stdin
+- `read_input()` - Read all input until EOF from stdin
+
+**Environment & System:**
+- `get_env(var_name)` - Get environment variable
+- `set_env(var_name, value)` - Set environment variable
+- `get_args()` - Get command line arguments
+- `get_time()` - Get current Unix timestamp
+- `sleep(millis)` - Sleep for specified milliseconds
 
 **Example:**
 ```assembly

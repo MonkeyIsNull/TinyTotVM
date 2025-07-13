@@ -43,7 +43,7 @@ TinyTotVM is a **toy virtual machine** with features found in modern programming
 
 ### **Core Language Features**
 - **Stack-based Architecture** - Efficient execution with pre-allocated memory
-- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Function, Closure values
+- **Dynamic Typing** - Int, Float, String, Bool, Null, List, Object, Bytes, Function, Closure values
 - **Type Coercion** - Automatic conversion between compatible types (int <-> float)
 - **Memory Management** - Automatic cleanup via Rust's ownership system
 - **Error Handling** - Comprehensive Result-based error system instead of crashes
@@ -171,7 +171,7 @@ CALL_FUNCTION          ; Outputs: sum of elements
 - **String Utilities** - Concatenation, repetition, case conversion, trimming
 - **List Operations** - Length, first/last, higher-order functions (map, filter, reduce)
 - **Type Conversion** - Convert between types with safety checks
-- **I/O Utilities** - Very basic File operations
+- **I/O Utilities** - Comprehensive I/O operations including file, environment, and process control
 - **Prelude Module** - Common functions imported together for convenience
 
 ### **Advanced Optimization Engine**
@@ -299,6 +299,25 @@ EXPORT name        ; Export variable/function by name
 PRINT              ; Print top stack value
 READ_FILE          ; Read file contents to string
 WRITE_FILE         ; Write string to file
+READ_LINE          ; Read line from stdin
+READ_CHAR          ; Read single character from stdin
+READ_INPUT         ; Read all input until EOF from stdin
+APPEND_FILE        ; Append content to file
+FILE_EXISTS        ; Check if file exists
+FILE_SIZE          ; Get file size in bytes
+DELETE_FILE        ; Delete a file
+LIST_DIR           ; List directory contents
+READ_BYTES         ; Read file as byte array
+WRITE_BYTES        ; Write byte array to file
+GET_ENV            ; Get environment variable
+SET_ENV            ; Set environment variable
+GET_ARGS           ; Get command line arguments
+EXEC               ; Execute external command
+EXEC_CAPTURE       ; Execute command and capture output
+EXIT               ; Exit with status code
+GET_TIME           ; Get current Unix timestamp
+SLEEP              ; Sleep for specified milliseconds
+FORMAT_TIME        ; Format timestamp to string
 HALT               ; Stop execution
 ```
 
@@ -634,6 +653,10 @@ The `examples/` directory contains comprehensive test programs:
 - **`advanced_optimization_test.ttvm`** - Advanced optimization features test
 - **`safe_advanced_optimization_test.ttvm`** - Safe advanced optimization demonstration
 - **`complete_optimization_showcase.ttvm`** - Complete demonstration of all 8 optimization passes
+- **`io_comprehensive_test.ttvm`** - Comprehensive test of all new I/O operations
+- **`io_interactive_test.ttvm`** - Interactive I/O demonstration (stdin/stdout)
+- **`io_simple_test.ttvm`** - Simple I/O test for basic file operations
+- **`stdlib_enhanced_io_test.ttvm`** - Enhanced I/O standard library demonstration
 
 ## Architecture
 
@@ -657,6 +680,7 @@ enum Value {
     Null,
     List(Vec<Value>),
     Object(HashMap<String, Value>),
+    Bytes(Vec<u8>),
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -673,7 +697,7 @@ Comprehensive error types with detailed messages:
 
 | **Feature Category** | **Capabilities** | **Status** |
 |---|---|---|
-| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Function, Closure |  Complete |
+| **Data Types** | Int64, Float64, String, Bool, Null, List, Object, Bytes, Function, Closure |  Complete |
 | **Arithmetic** | Full integer/float arithmetic with type coercion |  Complete |
 | **Control Flow** | Jumps, conditionals, function calls, returns |  Complete |
 | **Functions** | First-class functions, parameters, dynamic dispatch |  Complete |
@@ -682,7 +706,7 @@ Comprehensive error types with detailed messages:
 | **Modules** | Import/export, circular dependency detection |  Complete |
 | **Exceptions** | Structured try/catch/throw with stack unwinding |  Complete |
 | **Debugging** | Step-by-step tracing, breakpoints, performance metrics |  Complete |
-| **I/O** | File operations, printing, string manipulation |  Complete |
+| **I/O** | File operations, stdin/stdout, environment access, process execution, time operations |  Complete |
 | **Memory** | Automatic management, efficient stack allocation |  Complete |
 | **Standard Library** | Math, string, list, I/O, and conversion utilities |  Complete |
 

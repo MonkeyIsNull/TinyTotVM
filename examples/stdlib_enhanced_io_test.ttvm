@@ -1,0 +1,86 @@
+; Test enhanced I/O standard library functions
+
+IMPORT std/io.ttvm
+
+PUSH_STR "=== Enhanced I/O Standard Library Test ==="
+PRINT
+
+; Test environment functions
+PUSH_STR "--- Environment Functions ---"
+PRINT
+
+PUSH_STR "HOME"
+LOAD get_env
+CALL_FUNCTION
+PRINT
+
+; Test time functions
+PUSH_STR "--- Time Functions ---"
+PRINT
+
+LOAD get_time
+CALL_FUNCTION
+PRINT
+
+PUSH_STR "Sleeping for 100ms..."
+PRINT
+
+PUSH_INT 100
+LOAD sleep
+CALL_FUNCTION
+
+PUSH_STR "Sleep complete!"
+PRINT
+
+; Test file functions
+PUSH_STR "--- File Functions ---"
+PRINT
+
+PUSH_STR "/tmp/stdlib_test.txt"
+LOAD file_exists
+CALL_FUNCTION
+PRINT
+
+; Create a file using regular write_file
+PUSH_STR "/tmp/stdlib_test.txt"
+PUSH_STR "Standard library test content"
+LOAD write_file
+CALL_FUNCTION
+
+; Check existence again
+PUSH_STR "/tmp/stdlib_test.txt"
+LOAD file_exists
+CALL_FUNCTION
+PRINT
+
+; Get file size
+PUSH_STR "/tmp/stdlib_test.txt"
+LOAD file_size
+CALL_FUNCTION
+PRINT
+
+; Test directory listing
+PUSH_STR "--- Directory Listing ---"
+PRINT
+
+PUSH_STR "/tmp"
+LOAD list_dir
+CALL_FUNCTION
+PRINT
+
+; Test command line arguments
+PUSH_STR "--- Command Line Arguments ---"
+PRINT
+
+LOAD get_args
+CALL_FUNCTION
+PRINT
+
+; Clean up
+PUSH_STR "/tmp/stdlib_test.txt"
+DELETE_FILE
+
+PUSH_STR "=== Enhanced I/O Standard Library Test Complete ==="
+PRINT
+
+HALT

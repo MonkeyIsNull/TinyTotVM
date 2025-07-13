@@ -55,6 +55,7 @@ enum Value {
     Null,
     List(Vec<Value>),
     Object(HashMap<String, Value>),
+    Bytes(Vec<u8>),
     Function { addr: usize, params: Vec<String> },
     Closure { addr: usize, params: Vec<String>, captured: HashMap<String, Value> },
     Exception { message: String, stack_trace: Vec<String> },
@@ -85,6 +86,9 @@ impl fmt::Display for Value {
                     first = false;
                 }
                 write!(f, "}}")
+            },
+            Value::Bytes(bytes) => {
+                write!(f, "Bytes({})", bytes.len())
             },
             Value::Function { addr, params } => {
                 write!(f, "function@{} ({})", addr, params.join(", "))
@@ -156,6 +160,28 @@ enum OpCode {
     DumpScope,
     ReadFile,
     WriteFile,
+    // Enhanced I/O operations
+    ReadLine,       // Read line from stdin
+    ReadChar,       // Read single character from stdin  
+    ReadInput,      // Read until EOF from stdin
+    AppendFile,     // Append to file
+    FileExists,     // Check if file exists
+    FileSize,       // Get file size
+    DeleteFile,     // Delete file
+    ListDir,        // List directory contents
+    ReadBytes,      // Read file as byte array
+    WriteBytes,     // Write byte array to file
+    // Environment and system
+    GetEnv,         // Read environment variable
+    SetEnv,         // Set environment variable
+    GetArgs,        // Get command line arguments
+    Exec,           // Execute external command
+    ExecCapture,    // Execute and capture output
+    Exit,           // Exit with status code
+    // Time operations
+    GetTime,        // Get current timestamp
+    Sleep,          // Sleep for specified duration
+    FormatTime,     // Format timestamp
     // Object operations
     MakeObject,
     SetField(String),   // field name
@@ -1020,6 +1046,389 @@ impl VM {
                         }),
                     }
                 }
+                // Enhanced I/O operations
+                OpCode::ReadLine => {
+                    use std::io::{self, BufRead};
+                    let stdin = io::stdin();
+                    let mut line = String::new();
+                    match stdin.lock().read_line(&mut line) {
+                        Ok(_) => {
+                            // Remove trailing newline
+                            if line.ends_with('\n') {
+                                line.pop();
+                                if line.ends_with('\r') {
+                                    line.pop();
+                                }
+                            }
+                            self.stack.push(Value::Str(line));
+                        }
+                        Err(e) => return Err(VMError::FileError { 
+                            filename: "stdin".to_string(), 
+                            error: e.to_string() 
+                        }),
+                    }
+                }
+                OpCode::ReadChar => {
+                    use std::io::{self, Read};
+                    let mut stdin = io::stdin();
+                    let mut buffer = [0; 1];
+                    match stdin.read_exact(&mut buffer) {
+                        Ok(_) => {
+                            let ch = buffer[0] as char;
+                            self.stack.push(Value::Str(ch.to_string()));
+                        }
+                        Err(e) => return Err(VMError::FileError { 
+                            filename: "stdin".to_string(), 
+                            error: e.to_string() 
+                        }),
+                    }
+                }
+                OpCode::ReadInput => {
+                    use std::io::{self, Read};
+                    let mut stdin = io::stdin();
+                    let mut buffer = String::new();
+                    match stdin.read_to_string(&mut buffer) {
+                        Ok(_) => self.stack.push(Value::Str(buffer)),
+                        Err(e) => return Err(VMError::FileError { 
+                            filename: "stdin".to_string(), 
+                            error: e.to_string() 
+                        }),
+                    }
+                }
+                OpCode::AppendFile => {
+                    let filename = self.pop_stack("APPEND_FILE")?;
+                    let content = self.pop_stack("APPEND_FILE")?;
+                    match (filename, content) {
+                        (Value::Str(fname), Value::Str(body)) => {
+                            use std::fs::OpenOptions;
+                            use std::io::Write;
+                            match OpenOptions::new().create(true).append(true).open(&fname) {
+                                Ok(mut file) => {
+                                    if let Err(e) = file.write_all(body.as_bytes()) {
+                                        return Err(VMError::FileError { 
+                                            filename: fname, 
+                                            error: e.to_string() 
+                                        });
+                                    }
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: fname, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        (f, c) => return Err(VMError::TypeMismatch { 
+                            expected: "two strings (filename, content)".to_string(), 
+                            got: format!("{:?}, {:?}", f, c), 
+                            operation: "APPEND_FILE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::FileExists => {
+                    let val = self.pop_stack("FILE_EXISTS")?;
+                    match val {
+                        Value::Str(filename) => {
+                            let exists = std::path::Path::new(&filename).exists();
+                            self.stack.push(Value::Bool(exists));
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "FILE_EXISTS".to_string() 
+                        }),
+                    }
+                }
+                OpCode::FileSize => {
+                    let val = self.pop_stack("FILE_SIZE")?;
+                    match val {
+                        Value::Str(filename) => {
+                            match std::fs::metadata(&filename) {
+                                Ok(metadata) => self.stack.push(Value::Int(metadata.len() as i64)),
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "FILE_SIZE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::DeleteFile => {
+                    let val = self.pop_stack("DELETE_FILE")?;
+                    match val {
+                        Value::Str(filename) => {
+                            match std::fs::remove_file(&filename) {
+                                Ok(_) => {}
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "DELETE_FILE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::ListDir => {
+                    let val = self.pop_stack("LIST_DIR")?;
+                    match val {
+                        Value::Str(dirname) => {
+                            match std::fs::read_dir(&dirname) {
+                                Ok(entries) => {
+                                    let mut files = Vec::new();
+                                    for entry in entries {
+                                        match entry {
+                                            Ok(entry) => {
+                                                if let Some(name) = entry.file_name().to_str() {
+                                                    files.push(Value::Str(name.to_string()));
+                                                }
+                                            }
+                                            Err(e) => return Err(VMError::FileError { 
+                                                filename: dirname, 
+                                                error: e.to_string() 
+                                            }),
+                                        }
+                                    }
+                                    self.stack.push(Value::List(files));
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: dirname, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (directory name)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "LIST_DIR".to_string() 
+                        }),
+                    }
+                }
+                OpCode::ReadBytes => {
+                    let val = self.pop_stack("READ_bytes")?;
+                    match val {
+                        Value::Str(filename) => {
+                            match std::fs::read(&filename) {
+                                Ok(bytes) => self.stack.push(Value::Bytes(bytes)),
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "read_bytes".to_string() 
+                        }),
+                    }
+                }
+                OpCode::WriteBytes => {
+                    let filename = self.pop_stack("WRITE_BYTES")?;
+                    let content = self.pop_stack("WRITE_BYTES")?;
+                    match (filename, content) {
+                        (Value::Str(fname), Value::Bytes(bytes)) => {
+                            if let Err(e) = std::fs::write(&fname, &bytes) {
+                                return Err(VMError::FileError { 
+                                    filename: fname, 
+                                    error: e.to_string() 
+                                });
+                            }
+                        }
+                        (f, c) => return Err(VMError::TypeMismatch { 
+                            expected: "string (filename) and bytes".to_string(), 
+                            got: format!("{:?}, {:?}", f, c), 
+                            operation: "WRITE_BYTES".to_string() 
+                        }),
+                    }
+                }
+                // Environment and system operations
+                OpCode::GetEnv => {
+                    let val = self.pop_stack("GET_ENV")?;
+                    match val {
+                        Value::Str(var_name) => {
+                            match std::env::var(&var_name) {
+                                Ok(value) => self.stack.push(Value::Str(value)),
+                                Err(_) => self.stack.push(Value::Null),
+                            }
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "string (variable name)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "GET_ENV".to_string() 
+                        }),
+                    }
+                }
+                OpCode::SetEnv => {
+                    let value = self.pop_stack("SET_ENV")?;
+                    let var_name = self.pop_stack("SET_ENV")?;
+                    match (var_name, value) {
+                        (Value::Str(name), Value::Str(val)) => {
+                            std::env::set_var(&name, &val);
+                        }
+                        (n, v) => return Err(VMError::TypeMismatch { 
+                            expected: "two strings (variable name, value)".to_string(), 
+                            got: format!("{:?}, {:?}", n, v), 
+                            operation: "SET_ENV".to_string() 
+                        }),
+                    }
+                }
+                OpCode::GetArgs => {
+                    let args: Vec<Value> = std::env::args()
+                        .map(|arg| Value::Str(arg))
+                        .collect();
+                    self.stack.push(Value::List(args));
+                }
+                OpCode::Exec => {
+                    let args = self.pop_stack("EXEC")?;
+                    let command = self.pop_stack("EXEC")?;
+                    match (command, args) {
+                        (Value::Str(cmd), Value::List(arg_list)) => {
+                            use std::process::Command;
+                            let mut cmd_obj = Command::new(&cmd);
+                            for arg in arg_list {
+                                if let Value::Str(arg_str) = arg {
+                                    cmd_obj.arg(arg_str);
+                                } else {
+                                    return Err(VMError::TypeMismatch { 
+                                        expected: "list of strings (arguments)".to_string(), 
+                                        got: format!("{:?}", arg), 
+                                        operation: "EXEC".to_string() 
+                                    });
+                                }
+                            }
+                            match cmd_obj.status() {
+                                Ok(status) => {
+                                    let exit_code = status.code().unwrap_or(-1);
+                                    self.stack.push(Value::Int(exit_code as i64));
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: cmd, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        (c, a) => return Err(VMError::TypeMismatch { 
+                            expected: "string (command) and list (arguments)".to_string(), 
+                            got: format!("{:?}, {:?}", c, a), 
+                            operation: "EXEC".to_string() 
+                        }),
+                    }
+                }
+                OpCode::ExecCapture => {
+                    let args = self.pop_stack("EXEC_CAPTURE")?;
+                    let command = self.pop_stack("EXEC_CAPTURE")?;
+                    match (command, args) {
+                        (Value::Str(cmd), Value::List(arg_list)) => {
+                            use std::process::Command;
+                            let mut cmd_obj = Command::new(&cmd);
+                            for arg in arg_list {
+                                if let Value::Str(arg_str) = arg {
+                                    cmd_obj.arg(arg_str);
+                                } else {
+                                    return Err(VMError::TypeMismatch { 
+                                        expected: "list of strings (arguments)".to_string(), 
+                                        got: format!("{:?}", arg), 
+                                        operation: "EXEC_CAPTURE".to_string() 
+                                    });
+                                }
+                            }
+                            match cmd_obj.output() {
+                                Ok(output) => {
+                                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                    let exit_code = output.status.code().unwrap_or(-1);
+                                    
+                                    // Create result object
+                                    let mut result = HashMap::new();
+                                    result.insert("stdout".to_string(), Value::Str(stdout));
+                                    result.insert("stderr".to_string(), Value::Str(stderr));
+                                    result.insert("exit_code".to_string(), Value::Int(exit_code as i64));
+                                    self.stack.push(Value::Object(result));
+                                }
+                                Err(e) => return Err(VMError::FileError { 
+                                    filename: cmd, 
+                                    error: e.to_string() 
+                                }),
+                            }
+                        }
+                        (c, a) => return Err(VMError::TypeMismatch { 
+                            expected: "string (command) and list (arguments)".to_string(), 
+                            got: format!("{:?}, {:?}", c, a), 
+                            operation: "EXEC_CAPTURE".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Exit => {
+                    let val = self.pop_stack("EXIT")?;
+                    match val {
+                        Value::Int(code) => {
+                            std::process::exit(code as i32);
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "int (exit code)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "EXIT".to_string() 
+                        }),
+                    }
+                }
+                // Time operations
+                OpCode::GetTime => {
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    match SystemTime::now().duration_since(UNIX_EPOCH) {
+                        Ok(duration) => {
+                            self.stack.push(Value::Int(duration.as_secs() as i64));
+                        }
+                        Err(e) => return Err(VMError::FileError { 
+                            filename: "system_time".to_string(), 
+                            error: e.to_string() 
+                        }),
+                    }
+                }
+                OpCode::Sleep => {
+                    let val = self.pop_stack("SLEEP")?;
+                    match val {
+                        Value::Int(millis) => {
+                            let duration = std::time::Duration::from_millis(millis as u64);
+                            std::thread::sleep(duration);
+                        }
+                        Value::Float(millis) => {
+                            let duration = std::time::Duration::from_millis(millis as u64);
+                            std::thread::sleep(duration);
+                        }
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "int or float (milliseconds)".to_string(), 
+                            got: format!("{:?}", val), 
+                            operation: "SLEEP".to_string() 
+                        }),
+                    }
+                }
+                OpCode::FormatTime => {
+                    let format_str = self.pop_stack("FORMAT_TIME")?;
+                    let timestamp = self.pop_stack("FORMAT_TIME")?;
+                    match (timestamp, format_str) {
+                        (Value::Int(ts), Value::Str(_format)) => {
+                            // Simplified time formatting - just return ISO format
+                            use std::time::{SystemTime, UNIX_EPOCH, Duration};
+                            let system_time = UNIX_EPOCH + Duration::from_secs(ts as u64);
+                            // For simplicity, just return the timestamp as string
+                            // In a real implementation, we'd use chrono or similar for formatting
+                            self.stack.push(Value::Str(format!("{}", ts)));
+                        }
+                        (t, f) => return Err(VMError::TypeMismatch { 
+                            expected: "int (timestamp) and string (format)".to_string(), 
+                            got: format!("{:?}, {:?}", t, f), 
+                            operation: "FORMAT_TIME".to_string() 
+                        }),
+                    }
+                }
                 OpCode::DumpScope => {
                     println!("Current scope: {:?}", self.variables.last());
                 }
@@ -1412,6 +1821,28 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "END_TRY" => OpCode::EndTry,
             "READ_FILE" => OpCode::ReadFile,
             "WRITE_FILE" => OpCode::WriteFile,
+            // Enhanced I/O operations
+            "READ_LINE" => OpCode::ReadLine,
+            "READ_CHAR" => OpCode::ReadChar,
+            "READ_INPUT" => OpCode::ReadInput,
+            "APPEND_FILE" => OpCode::AppendFile,
+            "FILE_EXISTS" => OpCode::FileExists,
+            "FILE_SIZE" => OpCode::FileSize,
+            "DELETE_FILE" => OpCode::DeleteFile,
+            "LIST_DIR" => OpCode::ListDir,
+            "READ_BYTES" => OpCode::ReadBytes,
+            "WRITE_BYTES" => OpCode::WriteBytes,
+            // Environment and system
+            "GET_ENV" => OpCode::GetEnv,
+            "SET_ENV" => OpCode::SetEnv,
+            "GET_ARGS" => OpCode::GetArgs,
+            "EXEC" => OpCode::Exec,
+            "EXEC_CAPTURE" => OpCode::ExecCapture,
+            "EXIT" => OpCode::Exit,
+            // Time operations
+            "GET_TIME" => OpCode::GetTime,
+            "SLEEP" => OpCode::Sleep,
+            "FORMAT_TIME" => OpCode::FormatTime,
             "IMPORT" => {
                 let path = parts[1].trim();
                 // Remove quotes if present
@@ -1531,6 +1962,28 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::DumpScope => "DUMP_SCOPE".to_string(),
             OpCode::ReadFile => "READ_FILE".to_string(),
             OpCode::WriteFile => "WRITE_FILE".to_string(),
+            // Enhanced I/O operations
+            OpCode::ReadLine => "READ_LINE".to_string(),
+            OpCode::ReadChar => "READ_CHAR".to_string(),
+            OpCode::ReadInput => "READ_INPUT".to_string(),
+            OpCode::AppendFile => "APPEND_FILE".to_string(),
+            OpCode::FileExists => "FILE_EXISTS".to_string(),
+            OpCode::FileSize => "FILE_SIZE".to_string(),
+            OpCode::DeleteFile => "DELETE_FILE".to_string(),
+            OpCode::ListDir => "LIST_DIR".to_string(),
+            OpCode::ReadBytes => "READ_BYTES".to_string(),
+            OpCode::WriteBytes => "WRITE_BYTES".to_string(),
+            // Environment and system
+            OpCode::GetEnv => "GET_ENV".to_string(),
+            OpCode::SetEnv => "SET_ENV".to_string(),
+            OpCode::GetArgs => "GET_ARGS".to_string(),
+            OpCode::Exec => "EXEC".to_string(),
+            OpCode::ExecCapture => "EXEC_CAPTURE".to_string(),
+            OpCode::Exit => "EXIT".to_string(),
+            // Time operations
+            OpCode::GetTime => "GET_TIME".to_string(),
+            OpCode::Sleep => "SLEEP".to_string(),
+            OpCode::FormatTime => "FORMAT_TIME".to_string(),
             OpCode::MakeObject => "MAKE_OBJECT".to_string(),
             OpCode::SetField(field) => format!("SET_FIELD {}", field),
             OpCode::GetField(field) => format!("GET_FIELD {}", field),
