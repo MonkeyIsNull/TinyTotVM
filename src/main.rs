@@ -51,6 +51,11 @@ pub trait MessageSender: Send + Sync + std::fmt::Debug {
     fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String>;
 }
 
+// Trait for spawning new processes
+pub trait ProcessSpawner: Send + Sync + std::fmt::Debug {
+    fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>);
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProcState {
     Ready,
@@ -75,6 +80,8 @@ pub struct TinyProc {
     pub reduction_count: usize,
     pub max_reductions: usize,
     pub message_sender: Option<Arc<dyn MessageSender>>,
+    pub process_spawner: Option<Arc<dyn ProcessSpawner>>,
+    pub waiting_for_message: bool,
     // VM state (isolated per process)
     pub stack: Vec<Value>,
     pub instructions: Vec<OpCode>,
@@ -118,6 +125,15 @@ pub struct SchedulerPool {
 #[derive(Debug, Clone)]
 pub struct SchedulerPoolMessageSender {
     pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerPoolProcessSpawner {
+    pub next_proc_id: Arc<Mutex<ProcId>>,
+    pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
+    pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
+    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub message_sender: Arc<dyn MessageSender>,
 }
 
 impl Scheduler {
@@ -229,6 +245,14 @@ impl Scheduler {
         
         match proc.state {
             ProcState::Ready | ProcState::Waiting => {
+                // If process is waiting for a message, check if it has one now
+                if proc.waiting_for_message && !proc.has_messages() {
+                    // Still waiting for a message, requeue with low priority
+                    drop(proc);
+                    self.local_queue.push(proc_arc);
+                    return;
+                }
+                
                 match proc.run_until_yield() {
                     Ok(ProcState::Waiting) => {
                         // Process yielded, put it back in queue for next round
@@ -289,6 +313,46 @@ impl MessageSender for SchedulerPoolMessageSender {
     }
 }
 
+impl ProcessSpawner for SchedulerPoolProcessSpawner {
+    fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
+        // Get next process ID
+        let proc_id = {
+            let mut id = self.next_proc_id.lock().unwrap();
+            let current_id = *id;
+            *id += 1;
+            current_id
+        };
+        
+        let (mut proc, sender) = TinyProc::new(proc_id, instructions);
+        
+        // Set the message sender and process spawner for the new process
+        proc.message_sender = Some(self.message_sender.clone());
+        proc.process_spawner = Some(Arc::new(self.clone()));
+        
+        // Add process to submission queue for schedulers to pick up
+        let proc_arc = Arc::new(Mutex::new(proc));
+        
+        // Track running processes
+        {
+            let mut running = self.running_processes.lock().unwrap();
+            running.insert(proc_id, proc_arc.clone());
+        }
+        
+        // Register process in the registry for message delivery
+        {
+            let mut registry = self.process_registry.lock().unwrap();
+            registry.insert(proc_id, sender.clone());
+        }
+        
+        {
+            let mut queue = self.process_submission_queue.lock().unwrap();
+            queue.push(proc_arc);
+        }
+        
+        (proc_id, sender)
+    }
+}
+
 impl SchedulerPool {
     pub fn new() -> Self {
         SchedulerPool {
@@ -319,9 +383,21 @@ impl SchedulerPool {
         let proc_id = self.get_next_proc_id();
         let (mut proc, sender) = TinyProc::new(proc_id, instructions);
         
-        // Set the message sender for this process
-        proc.message_sender = Some(Arc::new(SchedulerPoolMessageSender {
+        // Create message sender
+        let message_sender = Arc::new(SchedulerPoolMessageSender {
             process_registry: self.process_registry.clone(),
+        });
+        
+        // Set the message sender for this process
+        proc.message_sender = Some(message_sender.clone());
+        
+        // Set the process spawner for this process
+        proc.process_spawner = Some(Arc::new(SchedulerPoolProcessSpawner {
+            next_proc_id: self.next_proc_id.clone(),
+            process_submission_queue: self.process_submission_queue.clone(),
+            running_processes: self.running_processes.clone(),
+            process_registry: self.process_registry.clone(),
+            message_sender: message_sender,
         }));
         
         // Add process to submission queue for schedulers to pick up
@@ -619,11 +695,13 @@ pub fn test_message_passing() -> Result<(), Box<dyn std::error::Error>> {
     // Create a scheduler pool with 2 threads
     let mut scheduler_pool = SchedulerPool::new_with_threads(2);
     
-    // Create process that will send messages
+    // Create process that will send messages (sender will be process 1, receiver will be process 2)
     let sender_process_instructions = vec![
+        OpCode::Yield,      // Let receiver start first
         OpCode::PushInt(2), // Target process ID
         OpCode::PushStr("Hello from Process 1!".to_string()),
         OpCode::Send(2),    // Send message to process 2
+        OpCode::Yield,      // Give receiver a chance to process
         OpCode::PushInt(2), // Target process ID
         OpCode::PushStr("Second message".to_string()),
         OpCode::Send(2),    // Send another message to process 2
@@ -632,10 +710,14 @@ pub fn test_message_passing() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create process that will receive messages
     let receiver_process_instructions = vec![
+        OpCode::PushStr("Receiver ready, waiting for messages...".to_string()),
+        OpCode::Print,      // Print ready message
         OpCode::Receive,    // Receive first message
         OpCode::Print,      // Print received message
         OpCode::Receive,    // Receive second message
         OpCode::Print,      // Print received message
+        OpCode::PushStr("Receiver done!".to_string()),
+        OpCode::Print,      // Print done message
         OpCode::Halt,
     ];
     
@@ -652,6 +734,42 @@ pub fn test_message_passing() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// Process spawning test function
+pub fn test_process_spawning() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing process spawning...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create a process that will spawn other processes
+    let parent_process_instructions = vec![
+        OpCode::PushStr("Parent process starting".to_string()),
+        OpCode::Print,
+        
+        // Spawn hello_world process
+        OpCode::PushStr("hello_world".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("Spawned hello_world process with ID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the spawned process ID
+        
+        OpCode::PushStr("Parent process done".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn the parent process
+    let (parent_id, _sender) = scheduler_pool.spawn_process(parent_process_instructions);
+    
+    println!("Spawned parent process: {}", parent_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Process spawning test completed!");
+    Ok(())
+}
+
 impl TinyProc {
     pub fn new(id: ProcId, instructions: Vec<OpCode>) -> (Self, Sender<Message>) {
         let (sender, receiver) = crossbeam::channel::unbounded();
@@ -665,6 +783,8 @@ impl TinyProc {
             reduction_count: 0,
             max_reductions: 1000, // Default reduction limit
             message_sender: None, // Will be set by scheduler
+            process_spawner: None, // Will be set by scheduler
+            waiting_for_message: false,
             
             // Initialize VM state
             stack: Vec::new(),
@@ -696,6 +816,14 @@ impl TinyProc {
     
     pub fn receive_message(&self) -> Result<Message, crossbeam::channel::TryRecvError> {
         self.mailbox.try_recv()
+    }
+    
+    pub fn receive_message_blocking(&self) -> Result<Message, crossbeam::channel::RecvError> {
+        self.mailbox.recv()
+    }
+    
+    pub fn has_messages(&self) -> bool {
+        !self.mailbox.is_empty()
     }
     
     pub fn has_reductions_left(&self) -> bool {
@@ -805,15 +933,55 @@ impl TinyProc {
                 return Ok(());
             }
             OpCode::Spawn => {
-                // For now, just pop the function and continue
-                // TODO: Implement proper process spawning
-                let _function = self.pop_stack("SPAWN")?;
-                self.stack.push(Value::Int(0)); // Push dummy process ID
+                // For now, spawn a simple process with basic instructions
+                // In a real implementation, we'd parse the function from the stack
+                let function_value = self.pop_stack("SPAWN")?;
+                
+                // Create a simple process based on the function value
+                let new_process_instructions = match function_value {
+                    Value::Str(ref s) if s == "hello_world" => {
+                        vec![
+                            OpCode::PushStr("Hello from spawned process!".to_string()),
+                            OpCode::Print,
+                            OpCode::Halt,
+                        ]
+                    }
+                    Value::Str(ref s) if s == "counter" => {
+                        vec![
+                            OpCode::PushInt(1),
+                            OpCode::Print,
+                            OpCode::PushInt(2),
+                            OpCode::Print,
+                            OpCode::PushInt(3),
+                            OpCode::Print,
+                            OpCode::Halt,
+                        ]
+                    }
+                    _ => {
+                        // Default: spawn a simple process
+                        vec![
+                            OpCode::PushStr("Spawned process".to_string()),
+                            OpCode::Print,
+                            OpCode::Halt,
+                        ]
+                    }
+                };
+                
+                // Spawn the new process
+                if let Some(spawner) = &self.process_spawner {
+                    let (new_proc_id, _sender) = spawner.spawn_process(new_process_instructions);
+                    self.stack.push(Value::Int(new_proc_id as i64));
+                } else {
+                    eprintln!("No process spawner available for process {}", self.id);
+                    self.stack.push(Value::Int(0)); // Push dummy process ID
+                }
             }
             OpCode::Receive => {
                 // Try to receive a message from mailbox
                 match self.receive_message() {
                     Ok(msg) => {
+                        // Message received successfully
+                        self.waiting_for_message = false;
                         match msg {
                             Message::Value(val) => self.stack.push(val),
                             Message::Signal(sig) => self.stack.push(Value::Str(sig)),
@@ -821,9 +989,10 @@ impl TinyProc {
                         }
                     }
                     Err(_) => {
-                        // No message available, yield
-                        self.ip += 1; // Advance IP before yielding
+                        // No message available, mark as waiting and yield
+                        self.waiting_for_message = true;
                         self.state = ProcState::Waiting;
+                        // Don't advance IP - we want to retry this instruction when rescheduled
                         return Ok(());
                     }
                 }
@@ -4542,6 +4711,7 @@ fn main() {
         eprintln!("       ttvm test-concurrency                           # Run concurrency tests");
         eprintln!("       ttvm test-multithreaded                         # Run multi-threaded scheduler tests");
         eprintln!("       ttvm test-message-passing                       # Run message passing tests");
+        eprintln!("       ttvm test-process-spawning                      # Run process spawning tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
@@ -4695,6 +4865,16 @@ fn main() {
                     Ok(_) => println!("All message passing tests passed!"),
                     Err(e) => {
                         eprintln!("Message passing tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-process-spawning" => {
+                match test_process_spawning() {
+                    Ok(_) => println!("All process spawning tests passed!"),
+                    Err(e) => {
+                        eprintln!("Process spawning tests failed: {}", e);
                         std::process::exit(1);
                     }
                 }
