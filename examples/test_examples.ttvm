@@ -1,0 +1,64 @@
+; ===================================================================
+; EXAMPLE TEST: Simple Working Example
+; ===================================================================
+; This is a minimal example that demonstrates the core features
+; working together in a simple, testable way.
+
+; Main process
+PUSH_STR "=== Simple TinyTotVM Concurrency Test ==="
+PRINT
+
+; Register main process
+REGISTER "main"
+PUSH_STR "Main process registered as 'main'"
+PRINT
+
+; Spawn a worker process
+PUSH_STR "Spawning worker process..."
+PRINT
+
+PUSH_STR "worker"
+SPAWN                         ; Returns PID 2
+PRINT                         ; Print PID
+
+YIELD                         ; Let worker start
+
+; Send a message by PID
+PUSH_STR "Sending message by PID..."
+PRINT
+
+PUSH_STR "Hello from main!"
+SEND 2                        ; Send to PID 2
+
+YIELD                         ; Let worker process message
+
+; Wait for a response
+PUSH_STR "Waiting for response..."
+PRINT
+
+RECEIVE                       ; Wait for worker response
+PUSH_STR "Received: "
+PRINT
+PRINT                         ; Print the response
+
+; Test name registry
+PUSH_STR "Testing name registry..."
+PRINT
+
+WHEREIS "worker1"             ; Should find the worker
+PRINT                         ; Print the PID
+
+; Send message by name
+PUSH_STR "Sending message by name..."
+PRINT
+
+PUSH_STR "Hello by name!"
+SENDNAMED "worker1"           ; Send to named process
+
+YIELD                         ; Let worker process
+
+; Final message
+PUSH_STR "Test completed successfully!"
+PRINT
+
+HALT

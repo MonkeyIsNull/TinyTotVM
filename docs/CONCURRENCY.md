@@ -454,26 +454,54 @@ HALT
 ttvm --smp examples/concurrency_test.ttvm
 ```
 
+### Process Spawning with SPAWN
+
+```assembly
+; Spawn different types of processes
+PUSH_STR "Spawning hello_world process..."
+PRINT
+PUSH_STR "hello_world"
+SPAWN
+PRINT  ; Print spawned process ID
+
+PUSH_STR "Spawning counter process..."
+PRINT
+PUSH_STR "counter"
+SPAWN
+PRINT  ; Print spawned process ID
+
+HALT
+```
+
+### Process Registry and Communication
+
+```assembly
+; Register current process
+REGISTER "main_process"
+PUSH_STR "Process registered"
+PRINT
+
+; Look up process by name
+WHEREIS "main_process"
+PRINT  ; Print PID
+
+; Send message to process
+PUSH_STR "Hello message"
+SEND 1  ; Send to process ID 1
+PUSH_STR "Message sent"
+PRINT
+
+HALT
+```
+
 ### SMP Scheduler Usage
 
 ```bash
-# Single-threaded execution
-ttvm examples/concurrency_test.ttvm
+# Single-threaded execution (basic opcodes only)
+ttvm examples/simple_concurrency_demo.ttvm
 
-# Multi-threaded SMP execution (recommended)
-ttvm --smp examples/concurrency_test.ttvm
-```
-
-**Expected output:**
-```
-Running with BEAM-style SMP scheduler...
-Creating scheduler pool with 8 threads (CPU cores)
-=== Basic Concurrency Test ===
-3
-After yield
-30
-Process 1 exiting with reason: normal
-SMP scheduler shutdown complete
+# Multi-threaded SMP execution (full concurrency)
+ttvm --smp examples/simple_concurrency_demo.ttvm
 ```
 
 ### Compilation and Bytecode
@@ -497,26 +525,29 @@ ttvm --smp /tmp/test.ttb
 ### Process Communication (Advanced)
 
 ```assembly
-; Process A - Register with name and send message
-PUSH_STR "worker"
+; Process communication example
+; Register process with name
 REGISTER "worker"
 PUSH_STR "Registered as worker"
 PRINT
 
-; Send message to another process by name
-PUSH_STR "Hello from worker"
-SEND_NAMED "main"
+; Find process by name
+WHEREIS "worker"
+PRINT  ; Print the PID
+
+; Send message to process by ID
+PUSH_STR "Hello message"
+SEND 1  ; Send to process ID 1
 PUSH_STR "Message sent"
 PRINT
 
-; Process B - Receive message
-RECEIVE
-PRINT  ; Print received message
+; Yield to scheduler
+YIELD
+PUSH_STR "After yield"
+PRINT
 
 HALT
 ```
-
-> **Note**: Advanced process communication features require programmatic setup through the Rust API for full functionality.
 
 ### Testing Concurrency Features
 
@@ -709,12 +740,13 @@ WORKING: **Fully Implemented and Working**:
 - **Safety Features** - Infinite loop prevention and resource cleanup
 
 WORKING: **Available via OpCodes in .ttvm files**:
-- **SPAWN** - Spawn new process (works in .ttvm files)
+- **SPAWN** - Spawn new process ("hello_world", "counter" supported)
 - **REGISTER** - Process name registry (works in .ttvm files)  
 - **WHEREIS** - Find process by name (works in .ttvm files)
 - **SEND** - Send message to process by PID (works in .ttvm files)
 - **RECEIVE** - Receive message from mailbox (works in .ttvm files)
 - **YIELD** - Yield control to scheduler (works in .ttvm files)
+- **SENDNAMED** - Send message to named process (works in .ttvm files)
 
 WORKING: **Available via Rust API**:
 - **SEND_NAMED** - Send message to named process

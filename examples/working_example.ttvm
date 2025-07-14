@@ -1,0 +1,112 @@
+; ===================================================================
+; WORKING EXAMPLE: Using Actual Implemented Features
+; ===================================================================
+; This example uses only the features that are actually implemented
+; in the current TinyTotVM codebase.
+
+; Main process (PID 1)
+PUSH_STR "=== Working TinyTotVM Concurrency Example ==="
+PRINT
+
+; Register main process
+REGISTER "main"
+PUSH_STR "Main process registered as 'main'"
+PRINT
+
+; ===================================================================
+; SPAWN HELLO_WORLD PROCESS
+; ===================================================================
+; This is a supported process type that will work
+
+PUSH_STR "Spawning hello_world process..."
+PRINT
+
+PUSH_STR "hello_world"        ; Supported process type
+SPAWN                         ; Returns PID 2
+PRINT                         ; Print PID
+
+YIELD                         ; Let hello_world process run
+
+; ===================================================================
+; SPAWN COUNTER PROCESS
+; ===================================================================
+; Another supported process type
+
+PUSH_STR "Spawning counter process..."
+PRINT
+
+PUSH_STR "counter"            ; Supported process type
+SPAWN                         ; Returns PID 3
+PRINT                         ; Print PID
+
+YIELD                         ; Let counter process run
+
+; ===================================================================
+; SPAWN DEFAULT PROCESS
+; ===================================================================
+; Any other name creates a default process
+
+PUSH_STR "Spawning default process..."
+PRINT
+
+PUSH_STR "my_process"         ; Creates default process
+SPAWN                         ; Returns PID 4
+PRINT                         ; Print PID
+
+YIELD                         ; Let default process run
+
+; ===================================================================
+; SEND MESSAGES BY PID
+; ===================================================================
+; Send messages to spawned processes by their PID
+
+PUSH_STR "Sending message to PID 2..."
+PRINT
+
+PUSH_STR "Hello from main to PID 2!"
+SEND 2                        ; Send to hello_world process
+
+YIELD                         ; Give time for message processing
+
+PUSH_STR "Sending message to PID 3..."
+PRINT
+
+PUSH_STR "Hello from main to PID 3!"
+SEND 3                        ; Send to counter process
+
+YIELD                         ; Give time for message processing
+
+; ===================================================================
+; TEST NAME REGISTRY
+; ===================================================================
+; Check if we can lookup our own process
+
+PUSH_STR "Looking up 'main' process..."
+PRINT
+
+WHEREIS "main"                ; Should return PID 1
+PRINT                         ; Print the PID
+
+PUSH_STR "Looking up non-existent process..."
+PRINT
+
+WHEREIS "non_existent"        ; Should return 0
+PRINT                         ; Print 0
+
+; ===================================================================
+; CONCLUSION
+; ===================================================================
+PUSH_STR "Working example completed!"
+PRINT
+PUSH_STR "This demonstrates:"
+PRINT
+PUSH_STR "1. Process spawning with supported types"
+PRINT
+PUSH_STR "2. Basic message sending by PID"
+PRINT
+PUSH_STR "3. Process registration and lookup"
+PRINT
+PUSH_STR "4. Cooperative multitasking with YIELD"
+PRINT
+
+HALT

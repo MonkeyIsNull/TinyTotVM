@@ -1,0 +1,172 @@
+; ===================================================================
+; EXAMPLE 3: Name Registry with REGISTER/WHEREIS/SENDNAMED
+; ===================================================================
+; This example demonstrates the process name registry system using
+; REGISTER, WHEREIS, and SENDNAMED opcodes. This allows processes
+; to be identified by names instead of PIDs.
+
+; Main process (PID 1) - Acts as coordinator
+PUSH_STR "=== TinyTotVM Name Registry Example ==="
+PRINT
+
+PUSH_STR "Main process starting..."
+PRINT
+
+; ===================================================================
+; REGISTER MAIN PROCESS
+; ===================================================================
+; Register the main process with a name so other processes can find it
+
+PUSH_STR "Registering main process as 'coordinator'..."
+PRINT
+
+REGISTER "coordinator"        ; Register current process with name
+
+PUSH_STR "Main process registered successfully"
+PRINT
+
+; ===================================================================
+; SPAWN AND REGISTER WORKER PROCESSES
+; ===================================================================
+; Spawn worker processes and register them with meaningful names
+
+PUSH_STR "Spawning worker1 process..."
+PRINT
+
+PUSH_STR "worker"             ; Spawn worker process
+SPAWN                         ; Returns PID (should be 2)
+PRINT                         ; Print the PID
+
+YIELD                         ; Let worker process start
+
+; The worker process should register itself as "worker1"
+; We'll give it time to register
+YIELD
+
+; -------------------------------------------------------------------
+; Spawn second worker
+; -------------------------------------------------------------------
+
+PUSH_STR "Spawning worker2 process..."
+PRINT
+
+PUSH_STR "worker"             ; Spawn another worker process
+SPAWN                         ; Returns PID (should be 3)
+PRINT                         ; Print the PID
+
+YIELD                         ; Let worker process start
+YIELD                         ; Give it time to register
+
+; ===================================================================
+; LOOKUP PROCESSES BY NAME
+; ===================================================================
+; Use WHEREIS to find processes by their registered names
+
+PUSH_STR "Looking up 'worker1' process..."
+PRINT
+
+WHEREIS "worker1"             ; Find PID by name
+PRINT                         ; Print the PID (or 0 if not found)
+
+PUSH_STR "Looking up 'worker2' process..."
+PRINT
+
+WHEREIS "worker2"             ; Find PID by name
+PRINT                         ; Print the PID (or 0 if not found)
+
+PUSH_STR "Looking up 'coordinator' process..."
+PRINT
+
+WHEREIS "coordinator"         ; Find our own PID
+PRINT                         ; Print the PID (should be 1)
+
+PUSH_STR "Looking up non-existent process..."
+PRINT
+
+WHEREIS "non_existent"        ; This should return 0
+PRINT                         ; Print 0
+
+; ===================================================================
+; SEND MESSAGES USING NAMES
+; ===================================================================
+; Use SENDNAMED to send messages to processes by name
+
+PUSH_STR "Sending message to 'worker1' by name..."
+PRINT
+
+PUSH_STR "Hello worker1!"     ; Message to send
+SENDNAMED "worker1"           ; Send to named process
+
+YIELD                         ; Let worker process the message
+
+; -------------------------------------------------------------------
+; Send message to worker2
+; -------------------------------------------------------------------
+
+PUSH_STR "Sending message to 'worker2' by name..."
+PRINT
+
+PUSH_STR "Hello worker2!"     ; Message to send
+SENDNAMED "worker2"           ; Send to named process
+
+YIELD                         ; Let worker process the message
+
+; -------------------------------------------------------------------
+; Send termination messages
+; -------------------------------------------------------------------
+
+PUSH_STR "Sending termination messages to workers..."
+PRINT
+
+PUSH_STR "TERMINATE"          ; Termination signal
+SENDNAMED "worker1"           ; Send to worker1
+
+PUSH_STR "TERMINATE"          ; Termination signal
+SENDNAMED "worker2"           ; Send to worker2
+
+YIELD                         ; Let workers terminate
+
+; ===================================================================
+; DEMONSTRATE NAME REUSE
+; ===================================================================
+; After processes terminate, names become available again
+
+PUSH_STR "Spawning new process for name reuse demo..."
+PRINT
+
+PUSH_STR "worker"             ; Spawn new worker
+SPAWN                         ; Returns new PID
+PRINT                         ; Print the PID
+
+YIELD                         ; Let new worker start and register
+
+; Check if name is available again
+PUSH_STR "Checking if 'worker1' name is available again..."
+PRINT
+
+WHEREIS "worker1"             ; Should find new process or 0
+PRINT                         ; Print result
+
+; ===================================================================
+; RECEIVE MESSAGES SENT TO COORDINATOR
+; ===================================================================
+; Workers might send messages back to the coordinator
+
+PUSH_STR "Waiting for any messages sent to coordinator..."
+PRINT
+
+; Note: This is a simple example - in practice you'd want to
+; implement a proper message loop with timeouts
+
+RECEIVE                       ; Wait for incoming message
+PUSH_STR "Coordinator received: "
+PRINT
+PRINT                         ; Print the received message
+
+; ===================================================================
+; CONCLUSION
+; ===================================================================
+PUSH_STR "Name registry demonstration completed."
+PRINT
+
+HALT                          ; End main process

@@ -1,0 +1,318 @@
+; ===================================================================
+; EXAMPLE 4: Comprehensive BEAM-Style Workflow
+; ===================================================================
+; This example demonstrates a complete BEAM-style concurrent workflow
+; that combines process spawning, message passing, and name registry
+; to create a realistic distributed system pattern.
+
+; Main process (PID 1) - Acts as system supervisor
+PUSH_STR "=== TinyTotVM Comprehensive Workflow Example ==="
+PRINT
+
+PUSH_STR "Starting distributed task processing system..."
+PRINT
+
+; ===================================================================
+; SETUP SYSTEM SUPERVISOR
+; ===================================================================
+; Register the main process as the system supervisor
+
+PUSH_STR "Registering system supervisor..."
+PRINT
+
+REGISTER "supervisor"         ; Register as system supervisor
+
+PUSH_STR "System supervisor registered (PID 1)"
+PRINT
+
+; ===================================================================
+; SPAWN TASK MANAGER
+; ===================================================================
+; Create a task manager that will coordinate work distribution
+
+PUSH_STR "Spawning task manager..."
+PRINT
+
+PUSH_STR "task_manager"       ; Spawn task manager process
+SPAWN                         ; Returns PID 2
+PRINT                         ; Print the PID
+
+YIELD                         ; Let task manager start and register
+
+; ===================================================================
+; SPAWN WORKER POOL
+; ===================================================================
+; Create a pool of worker processes to handle tasks
+
+PUSH_STR "Creating worker pool..."
+PRINT
+
+; Spawn Worker 1
+PUSH_STR "Spawning worker 1..."
+PRINT
+
+PUSH_STR "worker"             ; Spawn first worker
+SPAWN                         ; Returns PID 3
+PRINT                         ; Print the PID
+
+YIELD                         ; Let worker start
+
+; Spawn Worker 2
+PUSH_STR "Spawning worker 2..."
+PRINT
+
+PUSH_STR "worker"             ; Spawn second worker
+SPAWN                         ; Returns PID 4
+PRINT                         ; Print the PID
+
+YIELD                         ; Let worker start
+
+; Spawn Worker 3
+PUSH_STR "Spawning worker 3..."
+PRINT
+
+PUSH_STR "worker"             ; Spawn third worker
+SPAWN                         ; Returns PID 5
+PRINT                         ; Print the PID
+
+YIELD                         ; Let worker start
+
+; ===================================================================
+; SPAWN RESULT COLLECTOR
+; ===================================================================
+; Create a process to collect and aggregate results
+
+PUSH_STR "Spawning result collector..."
+PRINT
+
+PUSH_STR "collector"          ; Spawn result collector
+SPAWN                         ; Returns PID 6
+PRINT                         ; Print the PID
+
+YIELD                         ; Let collector start and register
+
+; ===================================================================
+; VERIFY SYSTEM COMPONENTS
+; ===================================================================
+; Check that all system components are registered and ready
+
+PUSH_STR "Verifying system components..."
+PRINT
+
+; Check task manager
+PUSH_STR "Task manager PID: "
+PRINT
+WHEREIS "task_manager"
+PRINT
+
+; Check workers
+PUSH_STR "Worker1 PID: "
+PRINT
+WHEREIS "worker1"
+PRINT
+
+PUSH_STR "Worker2 PID: "
+PRINT
+WHEREIS "worker2"
+PRINT
+
+PUSH_STR "Worker3 PID: "
+PRINT
+WHEREIS "worker3"
+PRINT
+
+; Check result collector
+PUSH_STR "Collector PID: "
+PRINT
+WHEREIS "collector"
+PRINT
+
+; ===================================================================
+; DISTRIBUTE WORK TASKS
+; ===================================================================
+; Send work tasks to the task manager for distribution
+
+PUSH_STR "Distributing work tasks..."
+PRINT
+
+; Task 1: Mathematical computation
+PUSH_STR "TASK:MATH:42"       ; Task format: TYPE:OPERATION:DATA
+SENDNAMED "task_manager"      ; Send to task manager
+
+YIELD                         ; Let task manager process
+
+; Task 2: String processing
+PUSH_STR "TASK:STRING:Hello World"
+SENDNAMED "task_manager"      ; Send to task manager
+
+YIELD                         ; Let task manager process
+
+; Task 3: Boolean logic
+PUSH_STR "TASK:LOGIC:TRUE"
+SENDNAMED "task_manager"      ; Send to task manager
+
+YIELD                         ; Let task manager process
+
+; Task 4: Data validation
+PUSH_STR "TASK:VALIDATE:user@example.com"
+SENDNAMED "task_manager"      ; Send to task manager
+
+YIELD                         ; Let task manager process
+
+; Task 5: Complex calculation
+PUSH_STR "TASK:CALC:1000"
+SENDNAMED "task_manager"      ; Send to task manager
+
+YIELD                         ; Let task manager process
+
+; ===================================================================
+; MONITOR SYSTEM STATUS
+; ===================================================================
+; Check system status and collect results
+
+PUSH_STR "Monitoring system status..."
+PRINT
+
+; Send status request to task manager
+PUSH_STR "STATUS_REQUEST"
+SENDNAMED "task_manager"
+
+YIELD                         ; Let task manager respond
+
+; Wait for status response
+PUSH_STR "Waiting for status response..."
+PRINT
+
+RECEIVE                       ; Wait for status message
+PUSH_STR "Status: "
+PRINT
+PRINT                         ; Print the status
+
+; ===================================================================
+; COLLECT RESULTS
+; ===================================================================
+; Request results from the result collector
+
+PUSH_STR "Requesting results from collector..."
+PRINT
+
+PUSH_STR "GET_RESULTS"
+SENDNAMED "collector"         ; Request results
+
+YIELD                         ; Let collector process
+
+; Wait for results
+PUSH_STR "Waiting for results..."
+PRINT
+
+RECEIVE                       ; Wait for results message
+PUSH_STR "Results: "
+PRINT
+PRINT                         ; Print the results
+
+; ===================================================================
+; SYSTEM HEALTH CHECK
+; ===================================================================
+; Verify all components are still responding
+
+PUSH_STR "Performing system health check..."
+PRINT
+
+; Ping all components
+PUSH_STR "PING"
+SENDNAMED "task_manager"
+
+PUSH_STR "PING"  
+SENDNAMED "worker1"
+
+PUSH_STR "PING"
+SENDNAMED "worker2"
+
+PUSH_STR "PING"
+SENDNAMED "worker3"
+
+PUSH_STR "PING"
+SENDNAMED "collector"
+
+YIELD                         ; Let all components respond
+
+; Collect ping responses
+PUSH_STR "Collecting ping responses..."
+PRINT
+
+RECEIVE                       ; Response 1
+PUSH_STR "Response 1: "
+PRINT
+PRINT
+
+RECEIVE                       ; Response 2
+PUSH_STR "Response 2: "
+PRINT
+PRINT
+
+RECEIVE                       ; Response 3
+PUSH_STR "Response 3: "
+PRINT
+PRINT
+
+RECEIVE                       ; Response 4
+PUSH_STR "Response 4: "
+PRINT
+PRINT
+
+RECEIVE                       ; Response 5
+PUSH_STR "Response 5: "
+PRINT
+PRINT
+
+; ===================================================================
+; SYSTEM SHUTDOWN
+; ===================================================================
+; Gracefully shutdown all system components
+
+PUSH_STR "Initiating system shutdown..."
+PRINT
+
+; Send shutdown signals to all components
+PUSH_STR "SHUTDOWN"
+SENDNAMED "task_manager"
+
+PUSH_STR "SHUTDOWN"
+SENDNAMED "worker1"
+
+PUSH_STR "SHUTDOWN"
+SENDNAMED "worker2"
+
+PUSH_STR "SHUTDOWN"
+SENDNAMED "worker3"
+
+PUSH_STR "SHUTDOWN"
+SENDNAMED "collector"
+
+YIELD                         ; Let all components shutdown
+
+; ===================================================================
+; CONCLUSION
+; ===================================================================
+PUSH_STR "=== System Shutdown Complete ==="
+PRINT
+
+PUSH_STR "Comprehensive workflow demonstration completed successfully."
+PRINT
+
+PUSH_STR "This example showed:"
+PRINT
+PUSH_STR "1. Process spawning with SPAWN"
+PRINT
+PUSH_STR "2. Name registration with REGISTER/WHEREIS"
+PRINT
+PUSH_STR "3. Named message passing with SENDNAMED"
+PRINT
+PUSH_STR "4. Bidirectional communication with SEND/RECEIVE"
+PRINT
+PUSH_STR "5. System coordination and monitoring patterns"
+PRINT
+PUSH_STR "6. Graceful shutdown procedures"
+PRINT
+
+HALT                          ; End supervisor process

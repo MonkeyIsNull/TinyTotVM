@@ -1,0 +1,10 @@
+; Test SPAWN OpCode
+PUSH_STR "Testing SPAWN"
+PRINT
+
+; Try to spawn a process
+PUSH_STR "hello_world"
+SPAWN
+PRINT
+
+HALT
