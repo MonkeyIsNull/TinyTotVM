@@ -764,12 +764,14 @@ pub fn test_process_monitoring_linking() -> Result<(), Box<dyn std::error::Error
     // Create a scheduler pool with 2 threads
     let mut scheduler_pool = SchedulerPool::new_with_threads(2);
     
-    // First spawn the monitored process
+    // First spawn the monitored process that will wait longer
     let monitored_process_instructions = vec![
         OpCode::PushStr("Monitored process starting".to_string()),
         OpCode::Print,
         OpCode::Yield,  // Let other processes monitor/link
         OpCode::Yield,  // Give more time for setup
+        OpCode::Yield,  // Give even more time for setup
+        OpCode::Yield,  // Give even more time for setup
         OpCode::PushStr("Monitored process about to exit".to_string()),
         OpCode::Print,
         OpCode::Halt,   // This should trigger down/exit messages
@@ -946,6 +948,7 @@ impl TinyProc {
     
     // Handle process exit by sending appropriate signals and cleanup
     pub fn handle_process_exit(&mut self, reason: String) {
+        println!("Process {} exiting with reason: {}", self.id, reason);
         self.set_exit_reason(reason.clone());
         self.state = ProcState::Exited;
         
@@ -953,6 +956,7 @@ impl TinyProc {
         for (monitor_ref, monitored_pid) in self.monitors.iter() {
             if let Some(sender) = &self.message_sender {
                 let down_msg = Message::Down(self.id, monitor_ref.clone(), reason.clone());
+                println!("Sending down message to monitor {}: {:?}", monitored_pid, down_msg);
                 let _ = sender.send_message(*monitored_pid, down_msg);
             }
         }
@@ -961,6 +965,7 @@ impl TinyProc {
         for (monitoring_pid, monitor_ref) in self.monitored_by.iter() {
             if let Some(sender) = &self.message_sender {
                 let down_msg = Message::Down(self.id, monitor_ref.clone(), reason.clone());
+                println!("Sending down message to monitoring process {}: {:?}", monitoring_pid, down_msg);
                 let _ = sender.send_message(*monitoring_pid, down_msg);
             }
         }
@@ -969,6 +974,7 @@ impl TinyProc {
         for linked_pid in self.linked_processes.iter() {
             if let Some(sender) = &self.message_sender {
                 let exit_msg = Message::Exit(self.id);
+                println!("Sending exit signal to linked process {}: {:?}", linked_pid, exit_msg);
                 let _ = sender.send_message(*linked_pid, exit_msg);
             }
         }
@@ -995,6 +1001,71 @@ impl TinyProc {
         if !self.has_reductions_left() {
             self.state = ProcState::Waiting;
             return Ok(false); // Out of reductions, yield
+        }
+        
+        // Check for exit signals at the beginning of each instruction cycle
+        // Process all available messages to handle exit signals immediately
+        let mut exit_signal_received = false;
+        
+        while let Ok(msg) = self.receive_message() {
+            match msg {
+                Message::Exit(pid) => {
+                    // Handle exit signal from linked process
+                    println!("Process {} received exit signal from process {}", self.id, pid);
+                    if self.linked_processes.contains(&pid) {
+                        println!("Process {} is linked to {}, exiting due to exit signal", self.id, pid);
+                        // In BEAM, linked processes normally exit when receiving exit signals
+                        self.handle_process_exit(format!("exit_from_{}", pid));
+                        exit_signal_received = true;
+                        break;
+                    } else {
+                        println!("Process {} not linked to {}, discarding exit signal", self.id, pid);
+                        // Not linked, just discard the message
+                        // In a real implementation, we might handle this differently
+                    }
+                }
+                Message::Link(pid) => {
+                    // Handle link request automatically - bidirectional linking
+                    println!("Process {} received link request from process {}", self.id, pid);
+                    let was_already_linked = self.linked_processes.contains(&pid);
+                    println!("Process {} was already linked to {}: {}", self.id, pid, was_already_linked);
+                    self.link_process(pid);
+                    
+                    // Send back link confirmation to make it bidirectional
+                    // Only send if we weren't already linked to prevent infinite loop
+                    if !was_already_linked {
+                        if let Some(sender) = &self.message_sender {
+                            let link_back_msg = Message::Link(self.id);
+                            println!("Process {} sending link back message to process {}", self.id, pid);
+                            let _ = sender.send_message(pid, link_back_msg);
+                        }
+                    }
+                }
+                Message::Unlink(pid) => {
+                    // Handle unlink request automatically
+                    println!("Process {} received unlink request from process {}", self.id, pid);
+                    self.unlink_process(pid);
+                }
+                Message::Monitor(pid, monitor_ref) => {
+                    // Handle monitor request automatically
+                    println!("Process {} received monitor request from process {} with ref {}", self.id, pid, monitor_ref);
+                    self.add_monitor(pid, monitor_ref);
+                }
+                Message::Down(pid, monitor_ref, reason) => {
+                    // Handle down message automatically for immediate delivery
+                    println!("Process {} received down message: pid={}, ref={}, reason={}", self.id, pid, monitor_ref, reason);
+                    // Put it back in the queue for the Receive instruction to pick up
+                    let _ = self.mailbox_sender.send(Message::Down(pid, monitor_ref, reason));
+                }
+                _ => {
+                    // Other messages go back to queue for Receive to handle
+                    let _ = self.mailbox_sender.send(msg);
+                }
+            }
+        }
+        
+        if exit_signal_received {
+            return Ok(false);
         }
         
         let instruction = &self.instructions[self.ip].clone();
@@ -1155,8 +1226,22 @@ impl TinyProc {
                                 self.stack.push(Value::Str(format!("down:{}:{}:{}", pid, monitor_ref, reason)));
                             }
                             Message::Link(pid) => {
-                                // Handle link request
+                                // Handle link request - bidirectional linking
+                                println!("Process {} received link request from process {}", self.id, pid);
+                                let was_already_linked = self.linked_processes.contains(&pid);
+                                println!("Process {} was already linked to {}: {}", self.id, pid, was_already_linked);
                                 self.link_process(pid);
+                                
+                                // Send back link confirmation to make it bidirectional
+                                // Only send if we weren't already linked to prevent infinite loop
+                                if !was_already_linked {
+                                    if let Some(sender) = &self.message_sender {
+                                        let link_back_msg = Message::Link(self.id);
+                                        println!("Process {} sending link back message to process {}", self.id, pid);
+                                        let _ = sender.send_message(pid, link_back_msg);
+                                    }
+                                }
+                                
                                 self.stack.push(Value::Str(format!("linked:{}", pid)));
                             }
                             Message::Unlink(pid) => {
@@ -1221,9 +1306,11 @@ impl TinyProc {
                 // Send monitor request to the scheduler
                 if let Some(sender) = &self.message_sender {
                     let monitor_msg = Message::Monitor(self.id, monitor_ref.clone());
+                    println!("Process {} sending monitor request to process {}", self.id, target_proc_id);
                     match sender.send_message(*target_proc_id, monitor_msg) {
                         Ok(_) => {
                             // Push monitor reference to stack for use by the process
+                            println!("Process {} successfully sent monitor request to process {}", self.id, target_proc_id);
                             self.stack.push(Value::Str(monitor_ref));
                         }
                         Err(e) => {
@@ -1264,13 +1351,16 @@ impl TinyProc {
             }
             OpCode::Link(target_proc_id) => {
                 // Link to a process - bidirectional link
+                println!("Process {} linking to process {}", self.id, target_proc_id);
                 self.link_process(*target_proc_id);
                 
                 // Send link request to the target process
                 if let Some(sender) = &self.message_sender {
                     let link_msg = Message::Link(self.id);
+                    println!("Process {} sending link message to process {}", self.id, target_proc_id);
                     match sender.send_message(*target_proc_id, link_msg) {
                         Ok(_) => {
+                            println!("Process {} successfully sent link message to process {}", self.id, target_proc_id);
                             self.stack.push(Value::Str(format!("linked_{}", target_proc_id)));
                         }
                         Err(e) => {
