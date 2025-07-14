@@ -1,0 +1,117 @@
+; ===================================================================
+; EXAMPLE 2: Inter-Process Communication with SEND/RECEIVE
+; ===================================================================
+; This example demonstrates message passing between processes using
+; SEND and RECEIVE opcodes. Process IDs are assigned sequentially
+; starting from 1.
+
+; Main process (PID 1) - Acts as coordinator
+PUSH_STR "=== TinyTotVM Message Passing Example ==="
+PRINT
+
+PUSH_STR "Main process (PID 1) starting..."
+PRINT
+
+; ===================================================================
+; SPAWN RECEIVER PROCESS
+; ===================================================================
+; First, we spawn a receiver process that will wait for messages
+; The receiver will be PID 2
+
+PUSH_STR "Spawning receiver process..."
+PRINT
+
+PUSH_STR "receiver"           ; Spawn receiver process
+SPAWN                         ; Returns PID 2
+PRINT                         ; Print the PID
+
+YIELD                         ; Let receiver process start
+
+; ===================================================================
+; SEND MESSAGES TO RECEIVER
+; ===================================================================
+; Now send various types of messages to the receiver process
+
+PUSH_STR "Sending integer message to PID 2..."
+PRINT
+
+PUSH_INT 42                   ; Message to send
+SEND 2                        ; Send to process ID 2
+
+YIELD                         ; Let receiver process the message
+
+; -------------------------------------------------------------------
+; Send string message
+; -------------------------------------------------------------------
+
+PUSH_STR "Sending string message to PID 2..."
+PRINT
+
+PUSH_STR "Hello from main process!"
+SEND 2                        ; Send to process ID 2
+
+YIELD                         ; Let receiver process the message
+
+; -------------------------------------------------------------------
+; Send boolean message
+; -------------------------------------------------------------------
+
+PUSH_STR "Sending boolean message to PID 2..."
+PRINT
+
+TRUE                          ; Boolean value
+SEND 2                        ; Send to process ID 2
+
+YIELD                         ; Let receiver process the message
+
+; -------------------------------------------------------------------
+; Send termination message
+; -------------------------------------------------------------------
+
+PUSH_STR "Sending termination message to PID 2..."
+PRINT
+
+PUSH_STR "TERMINATE"          ; Termination signal
+SEND 2                        ; Send to process ID 2
+
+YIELD                         ; Let receiver process and terminate
+
+; ===================================================================
+; DEMONSTRATION OF BIDIRECTIONAL COMMUNICATION
+; ===================================================================
+; Spawn a process that will send messages back to us
+
+PUSH_STR "Spawning sender process for bidirectional communication..."
+PRINT
+
+PUSH_STR "sender"             ; Spawn sender process
+SPAWN                         ; Returns PID 3
+PRINT                         ; Print the PID
+
+YIELD                         ; Let sender process start
+
+; ===================================================================
+; RECEIVE MESSAGES FROM SENDER
+; ===================================================================
+; Now we act as receiver for messages from the sender process
+
+PUSH_STR "Waiting for message from sender process..."
+PRINT
+
+RECEIVE                       ; Wait for incoming message
+PUSH_STR "Received from sender: "
+PRINT
+PRINT                         ; Print the received message
+
+RECEIVE                       ; Wait for another message
+PUSH_STR "Received from sender: "
+PRINT
+PRINT                         ; Print the received message
+
+; ===================================================================
+; CONCLUSION
+; ===================================================================
+PUSH_STR "Main process completed message passing demonstration."
+PRINT
+
+HALT                          ; End main process

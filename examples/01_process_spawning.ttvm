@@ -1,0 +1,88 @@
+; ===================================================================
+; EXAMPLE 1: Basic Process Spawning with SPAWN OpCode
+; ===================================================================
+; This example demonstrates how to spawn different types of processes
+; using the SPAWN opcode in TinyTotVM. The SPAWN opcode expects a
+; function name string on the stack and creates a new process.
+
+; Main process starts here
+PUSH_STR "=== TinyTotVM Process Spawning Example ==="
+PRINT
+
+PUSH_STR "Main process starting (PID 1)"
+PRINT
+
+; ===================================================================
+; SPAWNING HELLO WORLD PROCESS
+; ===================================================================
+; The SPAWN opcode takes a function name from the stack and creates
+; a new process. The system has predefined templates for certain
+; function names like "hello_world".
+
+PUSH_STR "Spawning hello_world process..."
+PRINT
+
+PUSH_STR "hello_world"        ; Function name for SPAWN
+SPAWN                         ; Creates new process, returns PID on stack
+PRINT                         ; Print the returned PID
+
+YIELD                         ; Allow spawned process to run
+
+; ===================================================================
+; SPAWNING COUNTER PROCESS
+; ===================================================================
+; Another predefined process type that demonstrates counting
+
+PUSH_STR "Spawning counter process..."
+PRINT
+
+PUSH_STR "counter"            ; Function name for SPAWN
+SPAWN                         ; Creates new process, returns PID on stack
+PRINT                         ; Print the returned PID
+
+YIELD                         ; Allow spawned process to run
+
+; ===================================================================
+; SPAWNING CUSTOM PROCESS
+; ===================================================================
+; When spawning unknown process types, the system creates a default
+; process with basic functionality
+
+PUSH_STR "Spawning custom process..."
+PRINT
+
+PUSH_STR "my_custom_process"  ; Unknown function name
+SPAWN                         ; Creates default process, returns PID on stack
+PRINT                         ; Print the returned PID
+
+YIELD                         ; Allow spawned process to run
+
+; ===================================================================
+; MULTIPLE SPAWNS
+; ===================================================================
+; Demonstrate spawning multiple processes of the same type
+
+PUSH_STR "Spawning multiple hello_world processes..."
+PRINT
+
+PUSH_STR "hello_world"
+SPAWN
+PRINT
+
+PUSH_STR "hello_world"
+SPAWN
+PRINT
+
+PUSH_STR "hello_world"
+SPAWN
+PRINT
+
+YIELD                         ; Allow all spawned processes to run
+
+; ===================================================================
+; CONCLUSION
+; ===================================================================
+PUSH_STR "Main process completed. Check scheduler output for process activity."
+PRINT
+
+HALT                          ; End main process

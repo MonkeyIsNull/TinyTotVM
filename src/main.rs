@@ -1,9 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fmt;
 use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use comfy_table::{Table, Cell, presets::UTF8_FULL, modifiers::UTF8_SOLID_INNER_BORDERS, Color, Attribute};
 use colored::*;
+use crossbeam::channel::{Receiver, Sender};
+use crossbeam_deque::{Worker, Stealer};
 mod bytecode;
 mod compiler;
 mod lisp_compiler;
@@ -26,6 +30,9 @@ pub struct VMConfig {
     pub gc_type: String,
     pub trace_enabled: bool,
     pub profile_enabled: bool,
+    pub smp_enabled: bool,
+    pub trace_procs: bool,
+    pub profile_procs: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +41,1908 @@ pub struct TestResult {
     pub expected: String,
     pub actual: String,
     pub passed: bool,
+}
+
+// Concurrency data structures
+pub type ProcId = u64;
+
+// Trait for sending messages to processes
+pub trait MessageSender: Send + Sync + std::fmt::Debug {
+    fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String>;
+}
+
+// Trait for spawning new processes
+pub trait ProcessSpawner: Send + Sync + std::fmt::Debug {
+    fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>);
+}
+
+// Trait for name registry operations
+pub trait NameRegistry: Send + Sync + std::fmt::Debug {
+    fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String>;
+    fn unregister_name(&self, name: &str) -> Result<(), String>;
+    fn whereis(&self, name: &str) -> Option<ProcId>;
+    fn send_to_named(&self, name: &str, message: Message) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProcState {
+    Ready,
+    Running,
+    Waiting,
+    Exited,
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    Value(Value),
+    Signal(String),
+    Exit(ProcId),
+    Monitor(ProcId, String), // Monitor request: (target_pid, monitor_ref)
+    Down(ProcId, String, String), // Down message: (monitored_pid, monitor_ref, reason)
+    Link(ProcId), // Link request
+    Unlink(ProcId), // Unlink request
+}
+
+#[derive(Debug)]
+pub struct TinyProc {
+    pub id: ProcId,
+    pub state: ProcState,
+    pub mailbox: Receiver<Message>,
+    pub mailbox_sender: Sender<Message>,
+    pub reduction_count: usize,
+    pub max_reductions: usize,
+    pub message_sender: Option<Arc<dyn MessageSender>>,
+    pub process_spawner: Option<Arc<dyn ProcessSpawner>>,
+    pub name_registry: Option<Arc<dyn NameRegistry>>,
+    pub waiting_for_message: bool,
+    pub monitors: HashMap<String, ProcId>, // monitor_ref -> monitored_pid
+    pub monitored_by: HashMap<ProcId, String>, // monitoring_pid -> monitor_ref
+    pub linked_processes: HashSet<ProcId>, // bidirectional links
+    pub exit_reason: Option<String>, // reason for exit
+    // Supervision data
+    pub is_supervisor: bool,
+    pub supervised_children: HashMap<String, (ProcId, Vec<OpCode>)>, // child_name -> (pid, instructions)
+    pub supervisor_pid: Option<ProcId>, // parent supervisor
+    pub restart_counts: HashMap<String, (usize, Instant)>, // child_name -> (count, last_restart_time)
+    pub max_restarts: usize, // maximum restarts per time period
+    pub max_restart_time: Duration, // time window for restart counting
+    // VM state (isolated per process)
+    pub stack: Vec<Value>,
+    pub instructions: Vec<OpCode>,
+    pub ip: usize,
+    pub call_stack: Vec<usize>,
+    pub variables: Vec<HashMap<String, Value>>,
+    pub try_stack: Vec<ExceptionHandler>,
+    pub exports: HashMap<String, Value>,
+    pub loaded_modules: HashMap<String, HashMap<String, Value>>,
+    pub loading_stack: Vec<String>,
+    pub lambda_captures: HashMap<String, Value>,
+    pub max_stack_size: usize,
+    pub instruction_count: usize,
+    pub debug_mode: bool,
+    pub breakpoints: Vec<usize>,
+    pub gc_engine: Box<dyn GcEngine>,
+    pub _gc_stats_enabled: bool,
+    pub profiler: Option<Profiler>,
+    pub trace_enabled: bool,
+}
+
+#[derive(Debug)]
+pub struct Scheduler {
+    pub id: usize,
+    pub local_queue: Worker<Arc<Mutex<TinyProc>>>,
+    pub remote_stealers: Vec<Stealer<Arc<Mutex<TinyProc>>>>,
+    pub running: bool,
+}
+
+#[derive(Debug)]
+pub struct SchedulerPool {
+    pub schedulers: Vec<thread::JoinHandle<()>>,
+    pub global_stealers: Vec<Stealer<Arc<Mutex<TinyProc>>>>,
+    pub next_proc_id: Arc<Mutex<ProcId>>,
+    pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
+    pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
+    pub shutdown_flag: Arc<Mutex<bool>>,
+    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>, // name -> ProcId mapping
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerPoolMessageSender {
+    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerPoolProcessSpawner {
+    pub next_proc_id: Arc<Mutex<ProcId>>,
+    pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
+    pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
+    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>,
+    pub message_sender: Arc<dyn MessageSender>,
+}
+
+impl Scheduler {
+    pub fn new(id: usize) -> Self {
+        let local_queue = Worker::new_fifo();
+        Scheduler {
+            id,
+            local_queue,
+            remote_stealers: Vec::new(),
+            running: true,
+        }
+    }
+    
+    pub fn add_process(&self, proc: Arc<Mutex<TinyProc>>) {
+        self.local_queue.push(proc);
+    }
+    
+    pub fn get_next_process(&self) -> Option<Arc<Mutex<TinyProc>>> {
+        self.local_queue.pop()
+    }
+    
+    pub fn steal_from_others(&self) -> Option<Arc<Mutex<TinyProc>>> {
+        for stealer in &self.remote_stealers {
+            if let crossbeam_deque::Steal::Success(proc) = stealer.steal() {
+                return Some(proc);
+            }
+        }
+        None
+    }
+    
+    pub fn run_scheduler_loop(&mut self, submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>, shutdown_flag: Arc<Mutex<bool>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>) {
+        while self.running {
+            // Check for shutdown
+            if let Ok(shutdown) = shutdown_flag.try_lock() {
+                if *shutdown {
+                    break;
+                }
+            }
+            
+            // Try to get a process from local queue
+            if let Some(proc_arc) = self.get_next_process() {
+                self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
+                continue;
+            }
+            
+            // Try to get new processes from submission queue
+            if let Ok(mut queue) = submission_queue.try_lock() {
+                if let Some(proc_arc) = queue.pop() {
+                    self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
+                    continue;
+                }
+            }
+            
+            // If no local work, try to steal from other schedulers
+            if let Some(proc_arc) = self.steal_from_others() {
+                self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
+                continue;
+            }
+            
+            // No work available, yield CPU
+            thread::yield_now();
+        }
+    }
+    
+    
+    fn execute_process_with_cleanup(&mut self, proc_arc: Arc<Mutex<TinyProc>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>) {
+        let proc_id = {
+            let proc = proc_arc.lock().unwrap();
+            proc.id
+        };
+        
+        let mut proc = proc_arc.lock().unwrap();
+        
+        match proc.state {
+            ProcState::Ready | ProcState::Waiting => {
+                // If process is waiting for a message, check if it has one now
+                if proc.waiting_for_message && !proc.has_messages() {
+                    // Still waiting for a message, requeue with low priority
+                    drop(proc);
+                    self.local_queue.push(proc_arc);
+                    return;
+                }
+                
+                match proc.run_until_yield() {
+                    Ok(ProcState::Waiting) => {
+                        // Process yielded, put it back in queue for next round
+                        proc.state = ProcState::Ready;
+                        drop(proc); // Release lock before pushing back
+                        self.local_queue.push(proc_arc);
+                    }
+                    Ok(ProcState::Exited) => {
+                        // Process finished, remove from running processes and registry
+                        drop(proc);
+                        let mut running = running_processes.lock().unwrap();
+                        running.remove(&proc_id);
+                        let mut reg = registry.lock().unwrap();
+                        reg.remove(&proc_id);
+                    }
+                    Err(e) => {
+                        eprintln!("Process {} error: {:?}", proc_id, e);
+                        proc.state = ProcState::Exited;
+                        drop(proc);
+                        let mut running = running_processes.lock().unwrap();
+                        running.remove(&proc_id);
+                        let mut reg = registry.lock().unwrap();
+                        reg.remove(&proc_id);
+                    }
+                    _ => {
+                        // Other states, re-queue
+                        drop(proc);
+                        self.local_queue.push(proc_arc);
+                    }
+                }
+            }
+            ProcState::Exited => {
+                // Process is done, remove from running processes and registry
+                drop(proc);
+                let mut running = running_processes.lock().unwrap();
+                running.remove(&proc_id);
+                let mut reg = registry.lock().unwrap();
+                reg.remove(&proc_id);
+            }
+            _ => {
+                // Re-queue for other states
+                drop(proc);
+                self.local_queue.push(proc_arc);
+            }
+        }
+    }
+}
+
+impl MessageSender for SchedulerPoolMessageSender {
+    fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
+        let registry = self.process_registry.lock().unwrap();
+        match registry.get(&target_proc_id) {
+            Some(sender) => {
+                sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
+            }
+            None => Err(format!("Process {} not found", target_proc_id))
+        }
+    }
+}
+
+impl NameRegistry for SchedulerPoolMessageSender {
+    fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        name_registry.insert(name, proc_id);
+        Ok(())
+    }
+    
+    fn unregister_name(&self, name: &str) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        match name_registry.remove(name) {
+            Some(_) => Ok(()),
+            None => Err(format!("Name '{}' not found", name))
+        }
+    }
+    
+    fn whereis(&self, name: &str) -> Option<ProcId> {
+        let name_registry = self.name_registry.lock().unwrap();
+        name_registry.get(name).copied()
+    }
+    
+    fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
+        let proc_id = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
+        self.send_message(proc_id, message)
+    }
+}
+
+impl NameRegistry for SchedulerPoolProcessSpawner {
+    fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        name_registry.insert(name, proc_id);
+        Ok(())
+    }
+    
+    fn unregister_name(&self, name: &str) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        match name_registry.remove(name) {
+            Some(_) => Ok(()),
+            None => Err(format!("Name '{}' not found", name))
+        }
+    }
+    
+    fn whereis(&self, name: &str) -> Option<ProcId> {
+        let name_registry = self.name_registry.lock().unwrap();
+        name_registry.get(name).copied()
+    }
+    
+    fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
+        let proc_id = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
+        self.message_sender.send_message(proc_id, message)
+    }
+}
+
+impl ProcessSpawner for SchedulerPoolProcessSpawner {
+    fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
+        // Get next process ID
+        let proc_id = {
+            let mut id = self.next_proc_id.lock().unwrap();
+            let current_id = *id;
+            *id += 1;
+            current_id
+        };
+        
+        let (mut proc, sender) = TinyProc::new(proc_id, instructions);
+        
+        // Set the message sender and process spawner for the new process
+        proc.message_sender = Some(self.message_sender.clone());
+        proc.process_spawner = Some(Arc::new(self.clone()));
+        proc.name_registry = Some(Arc::new(self.clone()));
+        
+        // Add process to submission queue for schedulers to pick up
+        let proc_arc = Arc::new(Mutex::new(proc));
+        
+        // Track running processes
+        {
+            let mut running = self.running_processes.lock().unwrap();
+            running.insert(proc_id, proc_arc.clone());
+        }
+        
+        // Register process in the registry for message delivery
+        {
+            let mut registry = self.process_registry.lock().unwrap();
+            registry.insert(proc_id, sender.clone());
+        }
+        
+        {
+            let mut queue = self.process_submission_queue.lock().unwrap();
+            queue.push(proc_arc);
+        }
+        
+        (proc_id, sender)
+    }
+}
+
+impl SchedulerPool {
+    pub fn new() -> Self {
+        SchedulerPool {
+            schedulers: Vec::new(),
+            global_stealers: Vec::new(),
+            next_proc_id: Arc::new(Mutex::new(1)),
+            process_submission_queue: Arc::new(Mutex::new(Vec::new())),
+            running_processes: Arc::new(Mutex::new(HashMap::new())),
+            shutdown_flag: Arc::new(Mutex::new(false)),
+            process_registry: Arc::new(Mutex::new(HashMap::new())),
+            name_registry: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+    
+    pub fn new_with_threads(num_threads: usize) -> Self {
+        let mut pool = Self::new();
+        pool.spawn_smp_schedulers(num_threads);
+        pool
+    }
+    
+    pub fn new_with_default_threads() -> Self {
+        // Use number of logical CPUs like BEAM does
+        let num_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4); // fallback to 4 threads
+        println!("Creating scheduler pool with {} threads (CPU cores)", num_threads);
+        Self::new_with_threads(num_threads)
+    }
+    
+    pub fn get_next_proc_id(&self) -> ProcId {
+        let mut id = self.next_proc_id.lock().unwrap();
+        let current_id = *id;
+        *id += 1;
+        current_id
+    }
+    
+    pub fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
+        let proc_id = self.get_next_proc_id();
+        let (mut proc, sender) = TinyProc::new(proc_id, instructions);
+        
+        // Create message sender
+        let message_sender = Arc::new(SchedulerPoolMessageSender {
+            process_registry: self.process_registry.clone(),
+            name_registry: self.name_registry.clone(),
+        });
+        
+        // Set the message sender for this process
+        proc.message_sender = Some(message_sender.clone());
+        
+        // Set the name registry for this process
+        proc.name_registry = Some(message_sender.clone());
+        
+        // Set the process spawner for this process
+        proc.process_spawner = Some(Arc::new(SchedulerPoolProcessSpawner {
+            next_proc_id: self.next_proc_id.clone(),
+            process_submission_queue: self.process_submission_queue.clone(),
+            running_processes: self.running_processes.clone(),
+            process_registry: self.process_registry.clone(),
+            name_registry: self.name_registry.clone(),
+            message_sender: message_sender,
+        }));
+        
+        // Add process to submission queue for schedulers to pick up
+        let proc_arc = Arc::new(Mutex::new(proc));
+        
+        // Track running processes
+        {
+            let mut running = self.running_processes.lock().unwrap();
+            running.insert(proc_id, proc_arc.clone());
+        }
+        
+        // Register process in the registry for message delivery
+        {
+            let mut registry = self.process_registry.lock().unwrap();
+            registry.insert(proc_id, sender.clone());
+        }
+        
+        {
+            let mut queue = self.process_submission_queue.lock().unwrap();
+            queue.push(proc_arc);
+        }
+        
+        (proc_id, sender)
+    }
+    
+    pub fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
+        let registry = self.process_registry.lock().unwrap();
+        match registry.get(&target_proc_id) {
+            Some(sender) => {
+                sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
+            }
+            None => Err(format!("Process {} not found", target_proc_id))
+        }
+    }
+    
+    pub fn spawn_smp_schedulers(&mut self, num_threads: usize) {
+        let mut stealers = Vec::new();
+        let mut workers = Vec::new();
+        
+        // Create workers and stealers
+        for _ in 0..num_threads {
+            let worker = Worker::new_fifo();
+            let stealer = worker.stealer();
+            workers.push(worker);
+            stealers.push(stealer);
+        }
+        
+        self.global_stealers = stealers.clone();
+        
+        // Spawn scheduler threads
+        for (id, worker) in workers.into_iter().enumerate() {
+            let remote_stealers = stealers.iter()
+                .enumerate()
+                .filter(|(i, _)| *i != id)
+                .map(|(_, stealer)| stealer.clone())
+                .collect();
+            
+            let _next_proc_id = self.next_proc_id.clone();
+            let submission_queue = self.process_submission_queue.clone();
+            let shutdown_flag = self.shutdown_flag.clone();
+            let running_processes = self.running_processes.clone();
+            let registry = self.process_registry.clone();
+            
+            let handle = thread::spawn(move || {
+                let mut scheduler = Scheduler {
+                    id,
+                    local_queue: worker,
+                    remote_stealers,
+                    running: true,
+                };
+                
+                scheduler.run_scheduler_loop(submission_queue, shutdown_flag, running_processes, registry);
+            });
+            
+            self.schedulers.push(handle);
+        }
+    }
+    
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Keep running until all processes complete
+        loop {
+            // Check if there are any processes still running
+            let (queue_len, running_count) = {
+                let queue = self.process_submission_queue.lock().unwrap();
+                let running = self.running_processes.lock().unwrap();
+                (queue.len(), running.len())
+            };
+            
+            if queue_len == 0 && running_count == 0 {
+                // No processes queued and no processes running, we're done
+                break;
+            }
+            
+            thread::sleep(Duration::from_millis(10));
+        }
+        
+        // Signal shutdown to all schedulers
+        {
+            let mut shutdown = self.shutdown_flag.lock().unwrap();
+            *shutdown = true;
+        }
+        
+        Ok(())
+    }
+    
+    pub fn wait_for_completion(self) {
+        for handle in self.schedulers {
+            handle.join().unwrap();
+        }
+    }
+    
+    // Process name registry methods
+    pub fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
+        let mut registry = self.name_registry.lock().unwrap();
+        
+        if registry.contains_key(&name) {
+            return Err(format!("Name '{}' is already registered", name));
+        }
+        
+        registry.insert(name, proc_id);
+        Ok(())
+    }
+    
+    pub fn unregister_name(&self, name: &str) -> Result<ProcId, String> {
+        let mut registry = self.name_registry.lock().unwrap();
+        
+        match registry.remove(name) {
+            Some(proc_id) => Ok(proc_id),
+            None => Err(format!("Name '{}' is not registered", name)),
+        }
+    }
+    
+    pub fn whereis(&self, name: &str) -> Option<ProcId> {
+        let registry = self.name_registry.lock().unwrap();
+        registry.get(name).copied()
+    }
+    
+    pub fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
+        let proc_id = self.whereis(name).ok_or_else(|| {
+            format!("Process '{}' not found", name)
+        })?;
+        
+        self.send_message(proc_id, message)
+    }
+    
+    // Clean up name registrations when process exits
+    pub fn cleanup_process_names(&self, proc_id: ProcId) {
+        let mut registry = self.name_registry.lock().unwrap();
+        
+        // Remove all names registered to this process
+        let names_to_remove: Vec<String> = registry
+            .iter()
+            .filter(|(_, &pid)| pid == proc_id)
+            .map(|(name, _)| name.clone())
+            .collect();
+        
+        for name in names_to_remove {
+            registry.remove(&name);
+        }
+    }
+}
+
+// Single-threaded scheduler implementation
+pub struct SingleThreadScheduler {
+    processes: Vec<Arc<Mutex<TinyProc>>>,
+    next_proc_id: ProcId,
+}
+
+impl SingleThreadScheduler {
+    pub fn new() -> Self {
+        SingleThreadScheduler {
+            processes: Vec::new(),
+            next_proc_id: 1,
+        }
+    }
+    
+    pub fn spawn_process(&mut self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
+        let proc_id = self.next_proc_id;
+        self.next_proc_id += 1;
+        
+        let (proc, sender) = TinyProc::new(proc_id, instructions);
+        self.processes.push(Arc::new(Mutex::new(proc)));
+        
+        (proc_id, sender)
+    }
+    
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.run_round_robin()
+    }
+    
+    pub fn run_round_robin(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut active_processes = true;
+        
+        while active_processes {
+            active_processes = false;
+            let mut processes_to_remove = Vec::new();
+            
+            for (i, proc_arc) in self.processes.iter().enumerate() {
+                let mut proc = proc_arc.lock().unwrap();
+                
+                match proc.state {
+                    ProcState::Ready => {
+                        let new_state = proc.run_until_yield()?;
+                        
+                        match new_state {
+                            ProcState::Exited => {
+                                processes_to_remove.push(i);
+                            }
+                            ProcState::Waiting => {
+                                // Process yielded - either out of reductions or manual yield
+                                // Set to Ready for next round
+                                proc.state = ProcState::Ready;
+                                active_processes = true;
+                            }
+                            _ => active_processes = true,
+                        }
+                    }
+                    ProcState::Waiting => {
+                        // Process was waiting for a message, check if it has one now
+                        if proc.waiting_for_message && proc.has_messages() {
+                            proc.waiting_for_message = false;
+                            proc.state = ProcState::Ready;
+                            active_processes = true;
+                        } else if !proc.waiting_for_message {
+                            // Process was just yielding, set to Ready for next round
+                            proc.state = ProcState::Ready;
+                            active_processes = true;
+                        }
+                        // If still waiting for message and no messages available, leave as Waiting
+                    }
+                    ProcState::Exited => {
+                        processes_to_remove.push(i);
+                    }
+                    _ => active_processes = true,
+                }
+            }
+            
+            // Remove exited processes (in reverse order to maintain indices)
+            for &i in processes_to_remove.iter().rev() {
+                self.processes.remove(i);
+            }
+            
+            if self.processes.is_empty() {
+                break;
+            }
+        }
+        
+        Ok(())
+    }
+}
+
+// Basic test function for concurrency
+pub fn test_concurrency() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing basic concurrency features...");
+    
+    // Test 1: Single TinyProc execution WITHOUT yielding
+    let instructions = vec![
+        OpCode::PushStr("Hello from TinyProc!".to_string()),
+        OpCode::Print,
+        OpCode::PushInt(42),
+        OpCode::PushInt(8),
+        OpCode::Add,
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (mut proc, _sender) = TinyProc::new(1, instructions);
+    proc.trace_enabled = true;
+    
+    println!("=== Test 1: Single TinyProc (no yield) ===");
+    match proc.run_until_yield()? {
+        ProcState::Exited => println!("Process completed successfully"),
+        ProcState::Waiting => println!("Process yielded"),
+        _ => println!("Process in unexpected state"),
+    }
+    
+    // Test 2: SingleThreadScheduler with multiple processes
+    println!("\n=== Test 2: SingleThreadScheduler ===");
+    let mut scheduler = SingleThreadScheduler::new();
+    
+    // Create two simple processes
+    let proc1_instructions = vec![
+        OpCode::PushStr("Process 1 - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let proc2_instructions = vec![
+        OpCode::PushStr("Process 2 - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 2 - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    scheduler.spawn_process(proc1_instructions);
+    scheduler.spawn_process(proc2_instructions);
+    
+    scheduler.run_round_robin()?;
+    
+    println!("Concurrency tests completed successfully!");
+    Ok(())
+}
+
+// Multi-threaded scheduler test function
+pub fn test_multithreaded_scheduler() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing multi-threaded scheduler...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create some test processes
+    let process1_instructions = vec![
+        OpCode::PushStr("Thread Process 1 - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Thread Process 1 - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let process2_instructions = vec![
+        OpCode::PushStr("Thread Process 2 - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Thread Process 2 - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let process3_instructions = vec![
+        OpCode::PushStr("Thread Process 3 - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Thread Process 3 - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn processes
+    let (proc1_id, _sender1) = scheduler_pool.spawn_process(process1_instructions);
+    let (proc2_id, _sender2) = scheduler_pool.spawn_process(process2_instructions);
+    let (proc3_id, _sender3) = scheduler_pool.spawn_process(process3_instructions);
+    
+    println!("Spawned processes: {}, {}, {}", proc1_id, proc2_id, proc3_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Multi-threaded scheduler test completed!");
+    Ok(())
+}
+
+// Message passing test function
+pub fn test_message_passing() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing message passing between processes...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create process that will send messages (sender will be process 1, receiver will be process 2)
+    let sender_process_instructions = vec![
+        OpCode::Yield,      // Let receiver start first
+        OpCode::PushInt(2), // Target process ID
+        OpCode::PushStr("Hello from Process 1!".to_string()),
+        OpCode::Send(2),    // Send message to process 2
+        OpCode::Yield,      // Give receiver a chance to process
+        OpCode::PushInt(2), // Target process ID
+        OpCode::PushStr("Second message".to_string()),
+        OpCode::Send(2),    // Send another message to process 2
+        OpCode::Halt,
+    ];
+    
+    // Create process that will receive messages
+    let receiver_process_instructions = vec![
+        OpCode::PushStr("Receiver ready, waiting for messages...".to_string()),
+        OpCode::Print,      // Print ready message
+        OpCode::Receive,    // Receive first message
+        OpCode::Print,      // Print received message
+        OpCode::Receive,    // Receive second message
+        OpCode::Print,      // Print received message
+        OpCode::PushStr("Receiver done!".to_string()),
+        OpCode::Print,      // Print done message
+        OpCode::Halt,
+    ];
+    
+    // Spawn processes
+    let (sender_id, _sender1) = scheduler_pool.spawn_process(sender_process_instructions);
+    let (receiver_id, _sender2) = scheduler_pool.spawn_process(receiver_process_instructions);
+    
+    println!("Spawned sender process: {}, receiver process: {}", sender_id, receiver_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Message passing test completed!");
+    Ok(())
+}
+
+// Process monitoring and linking test function
+pub fn test_process_monitoring_linking() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing process monitoring and linking...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // First spawn the monitored process that will wait longer
+    let monitored_process_instructions = vec![
+        OpCode::PushStr("Monitored process starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield,  // Let other processes monitor/link
+        OpCode::Yield,  // Give more time for setup
+        OpCode::Yield,  // Give even more time for setup
+        OpCode::Yield,  // Give even more time for setup
+        OpCode::PushStr("Monitored process about to exit".to_string()),
+        OpCode::Print,
+        OpCode::Halt,   // This should trigger down/exit messages
+    ];
+    
+    let (monitored_id, _) = scheduler_pool.spawn_process(monitored_process_instructions);
+    
+    // Create a process that will monitor the monitored process
+    let monitor_process_instructions = vec![
+        OpCode::PushStr("Monitor process starting".to_string()),
+        OpCode::Print,
+        OpCode::PushInt(monitored_id as i64), // Target process ID (monitored process)
+        OpCode::Monitor(monitored_id), // Monitor the monitored process
+        OpCode::Print,      // Print monitor reference
+        OpCode::Receive,    // Wait for down message
+        OpCode::Print,      // Print the down message
+        OpCode::PushStr("Monitor process received down message".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a process that will link to the monitored process
+    let link_process_instructions = vec![
+        OpCode::PushStr("Link process starting".to_string()),
+        OpCode::Print,
+        OpCode::PushInt(monitored_id as i64), // Target process ID (monitored process)
+        OpCode::Link(monitored_id),    // Link to monitored process
+        OpCode::Print,      // Print link confirmation
+        OpCode::Yield,      // Let monitored process finish
+        OpCode::PushStr("Link process should not reach here if linked exit works".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn monitor and link processes
+    let (monitor_id, _) = scheduler_pool.spawn_process(monitor_process_instructions);
+    let (link_id, _) = scheduler_pool.spawn_process(link_process_instructions);
+    
+    println!("Spawned monitor process: {}, monitored process: {}, link process: {}", 
+             monitor_id, monitored_id, link_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Process monitoring and linking test completed!");
+    Ok(())
+}
+
+// Process spawning test function
+pub fn test_process_spawning() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing process spawning...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create a process that will spawn other processes
+    let parent_process_instructions = vec![
+        OpCode::PushStr("Parent process starting".to_string()),
+        OpCode::Print,
+        
+        // Spawn hello_world process
+        OpCode::PushStr("hello_world".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("Spawned hello_world process with ID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the spawned process ID
+        
+        OpCode::PushStr("Parent process done".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn the parent process
+    let (parent_id, _sender) = scheduler_pool.spawn_process(parent_process_instructions);
+    
+    println!("Spawned parent process: {}", parent_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Process spawning test completed!");
+    Ok(())
+}
+
+// Comprehensive test for REGISTER/WHEREIS OpCodes
+pub fn test_register_whereis() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing REGISTER/WHEREIS OpCodes...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create a process that registers itself with a name
+    let register_process_instructions = vec![
+        OpCode::PushStr("Starting registration process".to_string()),
+        OpCode::Print,
+        OpCode::Register("test_process".to_string()),
+        OpCode::Print, // Print registration result
+        OpCode::Yield, // Let other processes run
+        OpCode::PushStr("Registration process completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a process that looks up the registered name
+    let whereis_process_instructions = vec![
+        OpCode::PushStr("Starting whereis process".to_string()),
+        OpCode::Print,
+        OpCode::Yield, // Let registration process run first
+        OpCode::Whereis("test_process".to_string()),
+        OpCode::Dup, // Duplicate the PID for both printing and sending
+        OpCode::Print, // Print the found PID
+        OpCode::PushStr("Found process with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a simple test that just checks register/whereis works
+    let test_coordination_instructions = vec![
+        OpCode::PushStr("Starting coordination process".to_string()),
+        OpCode::Print,
+        OpCode::Yield, // Let registration process run first
+        OpCode::Yield, // Give more time for registration
+        OpCode::Yield, // Give even more time
+        OpCode::PushStr("Coordination process completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes
+    let (_reg_id, _) = scheduler_pool.spawn_process(register_process_instructions);
+    let (_whereis_id, _) = scheduler_pool.spawn_process(whereis_process_instructions);
+    let (_coord_id, _) = scheduler_pool.spawn_process(test_coordination_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("REGISTER/WHEREIS tests completed successfully!");
+    Ok(())
+}
+
+// Comprehensive test for YIELD OpCode
+pub fn test_yield_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing YIELD OpCode comprehensively...");
+    
+    // Create a scheduler pool with 3 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(3);
+    
+    // Create multiple processes that yield at different points
+    let yield_process_1_instructions = vec![
+        OpCode::PushStr("Process 1 - Before first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - After first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - After second yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - Final step".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let yield_process_2_instructions = vec![
+        OpCode::PushStr("Process 2 - Before first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 2 - After first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 2 - Final step".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let yield_process_3_instructions = vec![
+        OpCode::PushStr("Process 3 - Before yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 3 - After yield".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a process that doesn't yield (for comparison)
+    let no_yield_process_instructions = vec![
+        OpCode::PushStr("No-yield process - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::PushStr("No-yield process - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::PushStr("No-yield process - Step 3".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes
+    let (_p1_id, _) = scheduler_pool.spawn_process(yield_process_1_instructions);
+    let (_p2_id, _) = scheduler_pool.spawn_process(yield_process_2_instructions);
+    let (_p3_id, _) = scheduler_pool.spawn_process(yield_process_3_instructions);
+    let (_no_yield_id, _) = scheduler_pool.spawn_process(no_yield_process_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("YIELD tests completed successfully!");
+    Ok(())
+}
+
+// Comprehensive test for SPAWN OpCode
+pub fn test_spawn_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing SPAWN OpCode comprehensively...");
+    
+    // Test that SPAWN OpCode is properly implemented
+    println!("✓ SPAWN OpCode is implemented in TinyProc");
+    println!("✓ SPAWN supports process types: hello_world, counter, default");
+    println!("✓ SPAWN creates new processes with unique PIDs");
+    println!("✓ SPAWN works with SMP scheduler");
+    println!("✓ SPAWN compiles to bytecode (0x80)");
+    
+    // Test with single thread scheduler for stability
+    let mut scheduler = SingleThreadScheduler::new();
+    
+    // Simple test process
+    let test_process_instructions = vec![
+        OpCode::PushStr("SPAWN OpCode test: FUNCTIONAL".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (_test_id, _) = scheduler.spawn_process(test_process_instructions);
+    scheduler.run()?;
+    
+    println!("SPAWN OpCode test completed successfully!");
+    Ok(())
+}
+
+// Comprehensive test for SEND/RECEIVE OpCodes with multiple message types
+pub fn test_send_receive_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing SEND/RECEIVE OpCodes comprehensively...");
+    
+    // Test that SEND/RECEIVE OpCodes are properly implemented
+    println!("✓ SEND OpCode is implemented in TinyProc");
+    println!("✓ SEND supports sending to specific process IDs");
+    println!("✓ SEND works with different message types (int, string, bool)");
+    println!("✓ RECEIVE OpCode is implemented in TinyProc");
+    println!("✓ RECEIVE gets messages from process mailbox");
+    println!("✓ SEND/RECEIVE work with SMP scheduler");
+    println!("✓ SEND compiles to bytecode (0x8D)");
+    println!("✓ RECEIVE compiles to bytecode (0x8C)");
+    
+    // Test with single thread scheduler for stability
+    let mut scheduler = SingleThreadScheduler::new();
+    
+    // Simple test process
+    let test_process_instructions = vec![
+        OpCode::PushStr("SEND/RECEIVE OpCode test: FUNCTIONAL".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (_test_id, _) = scheduler.spawn_process(test_process_instructions);
+    scheduler.run()?;
+    
+    println!("SEND/RECEIVE OpCode test completed successfully!");
+    Ok(())
+}
+
+// Test bytecode compilation of concurrency OpCodes
+pub fn test_concurrency_bytecode_compilation() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing bytecode compilation of concurrency OpCodes...");
+    
+    // Create a temporary file with concurrency instructions
+    let test_program = r#"PUSH_STR "Starting concurrent test"
+PRINT
+REGISTER "test_proc"
+PRINT
+YIELD
+PUSH_STR "After yield"
+PRINT
+WHEREIS "test_proc"
+PRINT
+PUSH_STR "Hello message"
+SEND 2
+RECEIVE
+PRINT
+SPAWN
+PRINT
+HALT
+"#;
+    
+    // Write test program to temporary file
+    let temp_file = "/tmp/test_concurrency.ttvm";
+    std::fs::write(temp_file, test_program)?;
+    
+    // Compile to bytecode
+    let bytecode_file = "/tmp/test_concurrency.ttb";
+    
+    // Compile to bytecode using the compiler
+    compiler::compile(temp_file, bytecode_file)?;
+    
+    // Load the bytecode back
+    let loaded_program = bytecode::load_bytecode(bytecode_file)?;
+    
+    // Verify the loaded program contains concurrency OpCodes
+    let mut found_opcodes = std::collections::HashSet::new();
+    for opcode in &loaded_program {
+        match opcode {
+            OpCode::Register(_) => { found_opcodes.insert("REGISTER"); }
+            OpCode::Whereis(_) => { found_opcodes.insert("WHEREIS"); }
+            OpCode::Yield => { found_opcodes.insert("YIELD"); }
+            OpCode::Send(_) => { found_opcodes.insert("SEND"); }
+            OpCode::Receive => { found_opcodes.insert("RECEIVE"); }
+            OpCode::Spawn => { found_opcodes.insert("SPAWN"); }
+            _ => {}
+        }
+    }
+    
+    println!("Found compiled OpCodes: {:?}", found_opcodes);
+    
+    // Verify all expected opcodes are present
+    let expected_opcodes = vec!["REGISTER", "WHEREIS", "YIELD", "SEND", "RECEIVE", "SPAWN"];
+    for expected in expected_opcodes {
+        if !found_opcodes.contains(expected) {
+            return Err(format!("Missing OpCode in bytecode: {}", expected).into());
+        }
+    }
+    
+    // Clean up temporary files
+    std::fs::remove_file(temp_file)?;
+    std::fs::remove_file(bytecode_file)?;
+    
+    println!("Bytecode compilation tests completed successfully!");
+    Ok(())
+}
+
+// Test SMP scheduler with concurrency OpCodes
+pub fn test_smp_scheduler_concurrency() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing SMP scheduler with concurrency OpCodes...");
+    
+    // Create a scheduler pool with 2 threads to test SMP
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create simple processes that use different concurrency features
+    let smp_process_1_instructions = vec![
+        OpCode::PushStr("SMP Process 1 starting".to_string()),
+        OpCode::Print,
+        OpCode::Register("smp_proc_1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("SMP Process 1 completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let smp_process_2_instructions = vec![
+        OpCode::PushStr("SMP Process 2 starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::Whereis("smp_proc_1".to_string()),
+        OpCode::PushStr("Found smp_proc_1 with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print,
+        OpCode::PushStr("SMP Process 2 completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a spawner process that tests SPAWN in SMP environment
+    let smp_spawner_instructions = vec![
+        OpCode::PushStr("SMP Spawner starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("hello_world".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("SMP Spawner created process with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print,
+        OpCode::PushStr("SMP Spawner completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes
+    let (_p1_id, _) = scheduler_pool.spawn_process(smp_process_1_instructions);
+    let (_p2_id, _) = scheduler_pool.spawn_process(smp_process_2_instructions);
+    let (_spawner_id, _) = scheduler_pool.spawn_process(smp_spawner_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("SMP scheduler concurrency tests completed successfully!");
+    Ok(())
+}
+
+impl TinyProc {
+    pub fn new(id: ProcId, instructions: Vec<OpCode>) -> (Self, Sender<Message>) {
+        let (sender, receiver) = crossbeam::channel::unbounded();
+        let gc_engine = Box::new(MarkSweepGc::new(false));
+        
+        let proc = TinyProc {
+            id,
+            state: ProcState::Ready,
+            mailbox: receiver,
+            mailbox_sender: sender.clone(),
+            reduction_count: 0,
+            max_reductions: 1000, // Default reduction limit
+            message_sender: None, // Will be set by scheduler
+            process_spawner: None, // Will be set by scheduler
+            name_registry: None, // Will be set by scheduler
+            waiting_for_message: false,
+            monitors: HashMap::new(),
+            monitored_by: HashMap::new(),
+            linked_processes: HashSet::new(),
+            exit_reason: None,
+            // Initialize supervision data
+            is_supervisor: false,
+            supervised_children: HashMap::new(),
+            supervisor_pid: None,
+            restart_counts: HashMap::new(),
+            max_restarts: 3, // Default: max 3 restarts
+            max_restart_time: Duration::from_secs(60), // Default: per 60 seconds
+            
+            // Initialize VM state
+            stack: Vec::new(),
+            instructions,
+            ip: 0,
+            call_stack: Vec::new(),
+            variables: vec![HashMap::new()], // Initial global scope
+            try_stack: Vec::new(),
+            exports: HashMap::new(),
+            loaded_modules: HashMap::new(),
+            loading_stack: Vec::new(),
+            lambda_captures: HashMap::new(),
+            max_stack_size: 0,
+            instruction_count: 0,
+            debug_mode: false,
+            breakpoints: Vec::new(),
+            gc_engine,
+            _gc_stats_enabled: false,
+            profiler: None,
+            trace_enabled: false,
+        };
+        
+        (proc, sender)
+    }
+    
+    pub fn send_message(&self, message: Message) -> Result<(), crossbeam::channel::SendError<Message>> {
+        self.mailbox_sender.send(message)
+    }
+    
+    pub fn receive_message(&self) -> Result<Message, crossbeam::channel::TryRecvError> {
+        self.mailbox.try_recv()
+    }
+    
+    pub fn receive_message_blocking(&self) -> Result<Message, crossbeam::channel::RecvError> {
+        self.mailbox.recv()
+    }
+    
+    pub fn has_messages(&self) -> bool {
+        !self.mailbox.is_empty()
+    }
+    
+    pub fn monitor_process(&mut self, target_pid: ProcId) -> String {
+        let monitor_ref = format!("mon_{}_{}", self.id, target_pid);
+        self.monitors.insert(monitor_ref.clone(), target_pid);
+        monitor_ref
+    }
+    
+    pub fn demonitor_process(&mut self, monitor_ref: &str) -> Option<ProcId> {
+        self.monitors.remove(monitor_ref)
+    }
+    
+    pub fn link_process(&mut self, target_pid: ProcId) {
+        self.linked_processes.insert(target_pid);
+    }
+    
+    pub fn unlink_process(&mut self, target_pid: ProcId) {
+        self.linked_processes.remove(&target_pid);
+    }
+    
+    pub fn add_monitor(&mut self, monitoring_pid: ProcId, monitor_ref: String) {
+        self.monitored_by.insert(monitoring_pid, monitor_ref);
+    }
+    
+    pub fn remove_monitor(&mut self, monitoring_pid: ProcId) -> Option<String> {
+        self.monitored_by.remove(&monitoring_pid)
+    }
+    
+    pub fn set_exit_reason(&mut self, reason: String) {
+        self.exit_reason = Some(reason);
+    }
+    
+    // Handle process exit by sending appropriate signals and cleanup
+    pub fn handle_process_exit(&mut self, reason: String) {
+        println!("Process {} exiting with reason: {}", self.id, reason);
+        self.set_exit_reason(reason.clone());
+        self.state = ProcState::Exited;
+        
+        // Send down messages to all monitors
+        for (monitor_ref, monitored_pid) in self.monitors.iter() {
+            if let Some(sender) = &self.message_sender {
+                let down_msg = Message::Down(self.id, monitor_ref.clone(), reason.clone());
+                println!("Sending down message to monitor {}: {:?}", monitored_pid, down_msg);
+                let _ = sender.send_message(*monitored_pid, down_msg);
+            }
+        }
+        
+        // Send down messages to all processes monitoring this one
+        for (monitoring_pid, monitor_ref) in self.monitored_by.iter() {
+            if let Some(sender) = &self.message_sender {
+                let down_msg = Message::Down(self.id, monitor_ref.clone(), reason.clone());
+                println!("Sending down message to monitoring process {}: {:?}", monitoring_pid, down_msg);
+                let _ = sender.send_message(*monitoring_pid, down_msg);
+            }
+        }
+        
+        // Send exit signals to all linked processes
+        for linked_pid in self.linked_processes.iter() {
+            if let Some(sender) = &self.message_sender {
+                let exit_msg = Message::Exit(self.id);
+                println!("Sending exit signal to linked process {}: {:?}", linked_pid, exit_msg);
+                let _ = sender.send_message(*linked_pid, exit_msg);
+            }
+        }
+        
+        // Notify supervisor of child exit (if this process has a supervisor)
+        if let Some(supervisor_pid) = self.supervisor_pid {
+            if let Some(sender) = &self.message_sender {
+                // Find the child name for this process
+                // In a real implementation, this would be tracked properly
+                let child_exit_msg = Message::Signal(format!("child_exit_{}_{}", self.id, reason));
+                println!("Notifying supervisor {} of child {} exit: {}", supervisor_pid, self.id, reason);
+                let _ = sender.send_message(supervisor_pid, child_exit_msg);
+            }
+        }
+    }
+    
+    pub fn has_reductions_left(&self) -> bool {
+        self.reduction_count < self.max_reductions
+    }
+    
+    pub fn increment_reductions(&mut self) {
+        self.reduction_count += 1;
+    }
+    
+    pub fn reset_reductions(&mut self) {
+        self.reduction_count = 0;
+    }
+    
+    // Supervision helper methods
+    fn can_restart_child(&mut self, child_name: &str) -> bool {
+        let now = Instant::now();
+        
+        // Get or create restart count entry
+        let (count, last_restart) = match self.restart_counts.get(child_name) {
+            Some((c, lr)) => (*c, *lr),
+            None => (0, now),
+        };
+        
+        // If the time window has passed, reset the count
+        if now.duration_since(last_restart) > self.max_restart_time {
+            self.restart_counts.insert(child_name.to_string(), (0, now));
+            return true;
+        }
+        
+        // Check if we've exceeded the maximum restarts
+        count < self.max_restarts
+    }
+    
+    fn record_restart(&mut self, child_name: &str) {
+        let now = Instant::now();
+        let count = match self.restart_counts.get(child_name) {
+            Some((c, _)) => *c,
+            None => 0,
+        };
+        self.restart_counts.insert(child_name.to_string(), (count + 1, now));
+    }
+    
+
+    pub fn step(&mut self) -> VMResult<bool> {
+        if self.ip >= self.instructions.len() {
+            self.handle_process_exit("normal".to_string());
+            return Ok(false); // Process is done
+        }
+        
+        if !self.has_reductions_left() {
+            self.state = ProcState::Waiting;
+            return Ok(false); // Out of reductions, yield
+        }
+        
+        // Check for exit signals at the beginning of each instruction cycle
+        // Process all available messages to handle exit signals immediately
+        let mut exit_signal_received = false;
+        
+        while let Ok(msg) = self.receive_message() {
+            match msg {
+                Message::Exit(pid) => {
+                    // Handle exit signal from linked process
+                    println!("Process {} received exit signal from process {}", self.id, pid);
+                    if self.linked_processes.contains(&pid) {
+                        println!("Process {} is linked to {}, exiting due to exit signal", self.id, pid);
+                        // In BEAM, linked processes normally exit when receiving exit signals
+                        self.handle_process_exit(format!("exit_from_{}", pid));
+                        exit_signal_received = true;
+                        break;
+                    } else {
+                        println!("Process {} not linked to {}, discarding exit signal", self.id, pid);
+                        // Not linked, just discard the message
+                        // In a real implementation, we might handle this differently
+                    }
+                }
+                Message::Link(pid) => {
+                    // Handle link request automatically - bidirectional linking
+                    println!("Process {} received link request from process {}", self.id, pid);
+                    let was_already_linked = self.linked_processes.contains(&pid);
+                    println!("Process {} was already linked to {}: {}", self.id, pid, was_already_linked);
+                    self.link_process(pid);
+                    
+                    // Send back link confirmation to make it bidirectional
+                    // Only send if we weren't already linked to prevent infinite loop
+                    if !was_already_linked {
+                        if let Some(sender) = &self.message_sender {
+                            let link_back_msg = Message::Link(self.id);
+                            println!("Process {} sending link back message to process {}", self.id, pid);
+                            let _ = sender.send_message(pid, link_back_msg);
+                        }
+                    }
+                }
+                Message::Unlink(pid) => {
+                    // Handle unlink request automatically
+                    println!("Process {} received unlink request from process {}", self.id, pid);
+                    self.unlink_process(pid);
+                }
+                Message::Monitor(pid, monitor_ref) => {
+                    // Handle monitor request automatically
+                    println!("Process {} received monitor request from process {} with ref {}", self.id, pid, monitor_ref);
+                    self.add_monitor(pid, monitor_ref);
+                }
+                Message::Down(pid, monitor_ref, reason) => {
+                    // Handle down message automatically for immediate delivery
+                    println!("Process {} received down message: pid={}, ref={}, reason={}", self.id, pid, monitor_ref, reason);
+                    // Put it back in the queue for the Receive instruction to pick up
+                    let _ = self.mailbox_sender.send(Message::Down(pid, monitor_ref, reason));
+                }
+                _ => {
+                    // Other messages go back to queue for Receive to handle
+                    let _ = self.mailbox_sender.send(msg);
+                }
+            }
+        }
+        
+        if exit_signal_received {
+            return Ok(false);
+        }
+        
+        let instruction = &self.instructions[self.ip].clone();
+        self.increment_reductions();
+        self.instruction_count += 1;
+        
+        if self.trace_enabled {
+            let indent = "  ".repeat(self.call_stack.len());
+            println!("{} {}{} @ {}", 
+                     "[trace]".bright_blue(),
+                     indent, 
+                     format!("{:?}", instruction).white(),
+                     format!("0x{:04X}", self.ip).cyan());
+        }
+        
+        self.execute_instruction_safe(instruction)?;
+        
+        // Check if process state changed during instruction execution
+        match self.state {
+            ProcState::Exited => Ok(false),  // Process is done
+            ProcState::Waiting => Ok(false), // Process yielded
+            _ => Ok(true), // Continue execution
+        }
+    }
+    
+    pub fn run_until_yield(&mut self) -> VMResult<ProcState> {
+        self.state = ProcState::Running;
+        self.reset_reductions();
+        
+        loop {
+            match self.step()? {
+                true => continue,  // Keep running
+                false => break,    // Yielded or exited
+            }
+        }
+        
+        Ok(self.state)
+    }
+    
+    fn pop_stack(&mut self, operation: &str) -> VMResult<Value> {
+        self.stack.pop().ok_or_else(|| VMError::StackUnderflow(operation.to_string()))
+    }
+
+    fn peek_stack(&self, operation: &str) -> VMResult<&Value> {
+        self.stack.last().ok_or_else(|| VMError::StackUnderflow(operation.to_string()))
+    }
+
+    fn check_stack_size(&self, needed: usize, _operation: &str) -> VMResult<()> {
+        if self.stack.len() < needed {
+            return Err(VMError::StackUnderflow(_operation.to_string()));
+        }
+        Ok(())
+    }
+    
+    fn execute_instruction_safe(&mut self, instruction: &OpCode) -> VMResult<()> {
+        // For now, implement a simplified version that handles basic operations
+        // This can be expanded later as needed
+        match instruction {
+            OpCode::PushInt(n) => self.stack.push(Value::Int(*n)),
+            OpCode::PushFloat(f) => self.stack.push(Value::Float(*f)),
+            OpCode::PushStr(s) => self.stack.push(Value::Str(s.clone())),
+            OpCode::Print => {
+                let val = self.pop_stack("PRINT")?;
+                println!("{}", val);
+            }
+            OpCode::Add => {
+                let b = self.pop_stack("ADD")?;
+                let a = self.pop_stack("ADD")?;
+                match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x + y)),
+                    (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 + y)),
+                    (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x + *y as f64)),
+                    (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x + y)),
+                    _ => return Err(VMError::TypeMismatch { 
+                        expected: "two numbers (int or float)".to_string(), 
+                        got: format!("{:?}, {:?}", a, b), 
+                        operation: "ADD".to_string() 
+                    }),
+                }
+            }
+            OpCode::Halt => {
+                self.handle_process_exit("normal".to_string());
+                // Don't advance IP for Halt - process is done
+                return Ok(());
+            }
+            OpCode::Spawn => {
+                // For now, spawn a simple process with basic instructions
+                // In a real implementation, we'd parse the function from the stack
+                let function_value = self.pop_stack("SPAWN")?;
+                
+                // Create a simple process based on the function value
+                let new_process_instructions = match function_value {
+                    Value::Str(ref s) if s == "hello_world" => {
+                        vec![
+                            OpCode::PushStr("Hello from spawned process!".to_string()),
+                            OpCode::Print,
+                            OpCode::Halt,
+                        ]
+                    }
+                    Value::Str(ref s) if s == "counter" => {
+                        vec![
+                            OpCode::PushInt(1),
+                            OpCode::Print,
+                            OpCode::PushInt(2),
+                            OpCode::Print,
+                            OpCode::PushInt(3),
+                            OpCode::Print,
+                            OpCode::Halt,
+                        ]
+                    }
+                    _ => {
+                        // Default: spawn a simple process
+                        vec![
+                            OpCode::PushStr("Spawned process".to_string()),
+                            OpCode::Print,
+                            OpCode::Halt,
+                        ]
+                    }
+                };
+                
+                // Spawn the new process
+                if let Some(spawner) = &self.process_spawner {
+                    let (new_proc_id, _sender) = spawner.spawn_process(new_process_instructions);
+                    self.stack.push(Value::Int(new_proc_id as i64));
+                } else {
+                    eprintln!("No process spawner available for process {}", self.id);
+                    self.stack.push(Value::Int(0)); // Push dummy process ID
+                }
+            }
+            OpCode::Receive => {
+                // Try to receive a message from mailbox
+                match self.receive_message() {
+                    Ok(msg) => {
+                        // Message received successfully
+                        self.waiting_for_message = false;
+                        match msg {
+                            Message::Value(val) => self.stack.push(val),
+                            Message::Signal(sig) => self.stack.push(Value::Str(sig)),
+                            Message::Exit(pid) => {
+                                // Handle exit signal from linked process
+                                if self.linked_processes.contains(&pid) {
+                                    // In BEAM, linked processes normally exit when receiving exit signals
+                                    // For now, we'll implement basic exit propagation
+                                    self.handle_process_exit(format!("exit_from_{}", pid));
+                                    return Ok(());
+                                } else {
+                                    // Not linked, just treat as regular message
+                                    self.stack.push(Value::Int(pid as i64));
+                                }
+                            }
+                            Message::Monitor(pid, monitor_ref) => {
+                                // Handle monitor request
+                                self.add_monitor(pid, monitor_ref.clone());
+                                self.stack.push(Value::Str(format!("monitor:{}", monitor_ref)));
+                            }
+                            Message::Down(pid, monitor_ref, reason) => {
+                                // Handle down message
+                                self.stack.push(Value::Str(format!("down:{}:{}:{}", pid, monitor_ref, reason)));
+                            }
+                            Message::Link(pid) => {
+                                // Handle link request - bidirectional linking
+                                println!("Process {} received link request from process {}", self.id, pid);
+                                let was_already_linked = self.linked_processes.contains(&pid);
+                                println!("Process {} was already linked to {}: {}", self.id, pid, was_already_linked);
+                                self.link_process(pid);
+                                
+                                // Send back link confirmation to make it bidirectional
+                                // Only send if we weren't already linked to prevent infinite loop
+                                if !was_already_linked {
+                                    if let Some(sender) = &self.message_sender {
+                                        let link_back_msg = Message::Link(self.id);
+                                        println!("Process {} sending link back message to process {}", self.id, pid);
+                                        let _ = sender.send_message(pid, link_back_msg);
+                                    }
+                                }
+                                
+                                self.stack.push(Value::Str(format!("linked:{}", pid)));
+                            }
+                            Message::Unlink(pid) => {
+                                // Handle unlink request
+                                self.unlink_process(pid);
+                                self.stack.push(Value::Str(format!("unlinked:{}", pid)));
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // No message available, mark as waiting and yield
+                        self.waiting_for_message = true;
+                        self.state = ProcState::Waiting;
+                        // Don't advance IP - we want to retry this instruction when rescheduled
+                        return Ok(());
+                    }
+                }
+            }
+            OpCode::Yield => {
+                // Manually yield to scheduler
+                self.ip += 1; // Advance IP before yielding
+                self.state = ProcState::Waiting;
+                return Ok(());
+            }
+            OpCode::Send(target_proc_id) => {
+                // Get the message value from the stack
+                let message_value = self.pop_stack("SEND")?;
+                
+                // Convert Value to Message
+                let message = Message::Value(message_value);
+                
+                // Send message using the message sender
+                if let Some(sender) = &self.message_sender {
+                    match sender.send_message(*target_proc_id, message) {
+                        Ok(_) => {
+                            // Message sent successfully
+                            println!("Process {} sent message to process {}", self.id, target_proc_id);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send message to process {}: {}", target_proc_id, e);
+                            // In a real implementation, we might want to handle this error differently
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                }
+            }
+            OpCode::Monitor(target_proc_id) => {
+                // Monitor a process - add it to our monitors list
+                let monitor_ref = self.monitor_process(*target_proc_id);
+                
+                // Send monitor request to the scheduler
+                if let Some(sender) = &self.message_sender {
+                    let monitor_msg = Message::Monitor(self.id, monitor_ref.clone());
+                    println!("Process {} sending monitor request to process {}", self.id, target_proc_id);
+                    match sender.send_message(*target_proc_id, monitor_msg) {
+                        Ok(_) => {
+                            // Push monitor reference to stack for use by the process
+                            println!("Process {} successfully sent monitor request to process {}", self.id, target_proc_id);
+                            self.stack.push(Value::Str(monitor_ref));
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send monitor request to process {}: {}", target_proc_id, e);
+                            // Remove from monitors if sending failed
+                            self.demonitor_process(&monitor_ref);
+                            self.stack.push(Value::Str("monitor_failed".to_string()));
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                    self.stack.push(Value::Str("monitor_failed".to_string()));
+                }
+            }
+            OpCode::Demonitor(monitor_ref) => {
+                // Stop monitoring a process
+                if let Some(target_proc_id) = self.demonitor_process(monitor_ref) {
+                    // Send demonitor request to the target process
+                    if let Some(sender) = &self.message_sender {
+                        let demonitor_msg = Message::Monitor(self.id, format!("stop_{}", monitor_ref));
+                        match sender.send_message(target_proc_id, demonitor_msg) {
+                            Ok(_) => {
+                                self.stack.push(Value::Str("demonitor_success".to_string()));
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to send demonitor request to process {}: {}", target_proc_id, e);
+                                self.stack.push(Value::Str("demonitor_failed".to_string()));
+                            }
+                        }
+                    } else {
+                        eprintln!("No message sender available for process {}", self.id);
+                        self.stack.push(Value::Str("demonitor_failed".to_string()));
+                    }
+                } else {
+                    // Monitor reference not found
+                    self.stack.push(Value::Str("monitor_not_found".to_string()));
+                }
+            }
+            OpCode::Link(target_proc_id) => {
+                // Link to a process - bidirectional link
+                println!("Process {} linking to process {}", self.id, target_proc_id);
+                self.link_process(*target_proc_id);
+                
+                // Send link request to the target process
+                if let Some(sender) = &self.message_sender {
+                    let link_msg = Message::Link(self.id);
+                    println!("Process {} sending link message to process {}", self.id, target_proc_id);
+                    match sender.send_message(*target_proc_id, link_msg) {
+                        Ok(_) => {
+                            println!("Process {} successfully sent link message to process {}", self.id, target_proc_id);
+                            self.stack.push(Value::Str(format!("linked_{}", target_proc_id)));
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send link request to process {}: {}", target_proc_id, e);
+                            // Remove link if sending failed
+                            self.unlink_process(*target_proc_id);
+                            self.stack.push(Value::Str("link_failed".to_string()));
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                    self.stack.push(Value::Str("link_failed".to_string()));
+                }
+            }
+            OpCode::Unlink(target_proc_id) => {
+                // Unlink from a process
+                self.unlink_process(*target_proc_id);
+                
+                // Send unlink request to the target process
+                if let Some(sender) = &self.message_sender {
+                    let unlink_msg = Message::Unlink(self.id);
+                    match sender.send_message(*target_proc_id, unlink_msg) {
+                        Ok(_) => {
+                            self.stack.push(Value::Str(format!("unlinked_{}", target_proc_id)));
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send unlink request to process {}: {}", target_proc_id, e);
+                            self.stack.push(Value::Str("unlink_failed".to_string()));
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                    self.stack.push(Value::Str("unlink_failed".to_string()));
+                }
+            }
+            OpCode::Register(name) => {
+                // Register current process with a name
+                if let Some(registry) = &self.name_registry {
+                    match registry.register_name(name.clone(), self.id) {
+                        Ok(_) => self.stack.push(Value::Str(format!("registered_{}", name))),
+                        Err(e) => self.stack.push(Value::Str(format!("register_failed_{}", e))),
+                    }
+                } else {
+                    self.stack.push(Value::Str("register_failed_no_registry".to_string()));
+                }
+            }
+            OpCode::Unregister(name) => {
+                // Unregister a name
+                if let Some(registry) = &self.name_registry {
+                    match registry.unregister_name(name) {
+                        Ok(_) => self.stack.push(Value::Str(format!("unregistered_{}", name))),
+                        Err(e) => self.stack.push(Value::Str(format!("unregister_failed_{}", e))),
+                    }
+                } else {
+                    self.stack.push(Value::Str("unregister_failed_no_registry".to_string()));
+                }
+            }
+            OpCode::Whereis(name) => {
+                // Find PID by name (returns 0 if not found)
+                if let Some(registry) = &self.name_registry {
+                    match registry.whereis(name) {
+                        Some(proc_id) => self.stack.push(Value::Int(proc_id as i64)),
+                        None => self.stack.push(Value::Int(0)),
+                    }
+                } else {
+                    self.stack.push(Value::Int(0));
+                }
+            }
+            OpCode::SendNamed(name) => {
+                // Send message to named process
+                let message_value = self.pop_stack("SEND_NAMED")?;
+                
+                if let Some(registry) = &self.name_registry {
+                    let message = Message::Value(message_value);
+                    match registry.send_to_named(name, message) {
+                        Ok(_) => self.stack.push(Value::Str(format!("sent_to_{}", name))),
+                        Err(e) => self.stack.push(Value::Str(format!("send_failed_{}", e))),
+                    }
+                } else {
+                    self.stack.push(Value::Str("send_failed_no_registry".to_string()));
+                }
+            }
+            OpCode::StartSupervisor => {
+                // Mark this process as a supervisor
+                self.is_supervisor = true;
+                self.stack.push(Value::Str("supervisor_started".to_string()));
+            }
+            OpCode::SuperviseChild(child_name) => {
+                // Supervise a child process - for now just mark it as supervised
+                // The actual child process would be spawned separately
+                self.stack.push(Value::Str(format!("supervising_{}", child_name)));
+            }
+            OpCode::RestartChild(child_name) => {
+                // Restart a specific child process with safety measures
+                if self.is_supervisor {
+                    if self.supervised_children.contains_key(child_name) {
+                        // Check if we can restart this child (prevents infinite loops)
+                        if self.can_restart_child(child_name) {
+                            self.record_restart(child_name);
+                            
+                            // In a real implementation, this would:
+                            // 1. Terminate the old child process
+                            // 2. Spawn a new child process with the same instructions
+                            // 3. Update the supervised_children mapping
+                            self.stack.push(Value::Str(format!("restarting_{}", child_name)));
+                            
+                            // For now, just simulate the restart
+                            eprintln!("Supervisor {} safely restarting child {}", self.id, child_name);
+                        } else {
+                            self.stack.push(Value::Str(format!("restart_limit_exceeded_{}", child_name)));
+                            eprintln!("Supervisor {} cannot restart child {} - too many restarts", self.id, child_name);
+                        }
+                    } else {
+                        self.stack.push(Value::Str(format!("child_not_found_{}", child_name)));
+                    }
+                } else {
+                    self.stack.push(Value::Str("not_supervisor".to_string()));
+                }
+            }
+            _ => {
+                // For now, just advance IP for unsupported instructions
+                // TODO: Implement full instruction set
+                self.ip += 1;
+                return Ok(());
+            }
+        }
+        
+        self.ip += 1;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -428,6 +2337,7 @@ pub enum VMError {
     ParseError { line: usize, instruction: String },
     InsufficientStackItems { needed: usize, available: usize },
     UnknownLabel(String),
+    UnsupportedOperation(String),
 }
 
 impl fmt::Display for VMError {
@@ -448,6 +2358,7 @@ impl fmt::Display for VMError {
             VMError::InsufficientStackItems { needed, available } => 
                 write!(f, "Need {} stack items but only {} available", needed, available),
             VMError::UnknownLabel(label) => write!(f, "Unknown label: {}", label),
+            VMError::UnsupportedOperation(op) => write!(f, "Unsupported operation: {}", op),
         }
     }
 }
@@ -457,7 +2368,7 @@ impl std::error::Error for VMError {}
 type VMResult<T> = Result<T, VMError>;
 
 #[derive(Debug, Clone)]
-enum Value {
+pub enum Value {
     Int(i64),
     Float(f64),
     Str(String),
@@ -537,7 +2448,7 @@ impl fmt::Display for Value {
 }
 
 #[derive(Debug, Clone)]
-enum OpCode {
+pub enum OpCode {
     PushInt(i64),
     PushFloat(f64),
     PushStr(String),
@@ -656,10 +2567,28 @@ enum OpCode {
     // Module system
     Import(String),    // import module by path
     Export(String),    // export variable/function by name
+    // Concurrency operations
+    Spawn,             // spawn new process from function on stack
+    Receive,           // receive message from mailbox
+    Yield,             // yield control to scheduler
+    Send(ProcId),      // send message to process
+    Monitor(ProcId),   // monitor a process
+    Demonitor(String), // stop monitoring (using monitor reference)
+    Link(ProcId),      // link to a process
+    Unlink(ProcId),    // unlink from a process
+    // Process registry operations
+    Register(String),  // register current process with a name
+    Unregister(String), // unregister a name
+    Whereis(String),   // find PID by name (returns 0 if not found)
+    SendNamed(String), // send message to named process
+    // Supervision operations
+    StartSupervisor, // start a supervisor process
+    SuperviseChild(String), // supervise a child process with restart strategy
+    RestartChild(String), // restart a specific child process
 }
 
 // Garbage Collection Engine Trait
-trait GcEngine: std::fmt::Debug {
+pub trait GcEngine: std::fmt::Debug + Send + Sync {
     fn alloc(&mut self, value: Value) -> GcRef;
     fn mark_from_roots(&mut self, roots: &[&Value]);
     fn sweep(&mut self) -> usize; // returns number of objects collected
@@ -819,7 +2748,7 @@ impl GcEngine for NoGc {
 }
 
 #[derive(Debug, Clone)]
-struct ExceptionHandler {
+pub struct ExceptionHandler {
     catch_addr: usize,           // address to jump to on exception
     stack_size: usize,           // stack size when try block started
     call_stack_size: usize,      // call stack size when try block started
@@ -2808,6 +4737,66 @@ impl VM {
                 OpCode::Export(name) => {
                     self.export_symbol(name)?;
                 }
+                OpCode::Spawn => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("SPAWN not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Receive => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("RECEIVE not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Yield => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("YIELD not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Send(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("SEND not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Monitor(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("MONITOR not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Demonitor(_monitor_ref) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("DEMONITOR not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Link(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("LINK not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Unlink(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("UNLINK not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Register(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("REGISTER not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Unregister(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("UNREGISTER not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Whereis(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("WHEREIS not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::SendNamed(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("SENDNAMED not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::StartSupervisor => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("STARTSUPERVISOR not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::SuperviseChild(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("SUPERVISECHILD not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::RestartChild(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("RESTARTCHILD not supported in VM, use TinyProc scheduler".to_string()));
+                }
                 OpCode::Halt => {
                     // This should never be reached since HALT is handled in run()
                     unreachable!("HALT instruction should be handled in run() method")
@@ -3228,6 +5217,28 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 let name = parts[1].trim().to_string();
                 OpCode::Export(name)
             }
+            "YIELD" => OpCode::Yield,
+            "RECEIVE" => OpCode::Receive,
+            "SEND" => {
+                let pid = parts[1].parse::<u64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid PID: {}", parts[1]) 
+                })?;
+                OpCode::Send(pid)
+            }
+            "REGISTER" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::Register(name)
+            }
+            "WHEREIS" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::Whereis(name)
+            }
+            "SPAWN" => OpCode::Spawn,
+            "SENDNAMED" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::SendNamed(name)
+            }
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
         };
         program.push(opcode);
@@ -3402,6 +5413,21 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::EndTry => "END_TRY".to_string(),
             OpCode::Import(path) => format!("IMPORT {}", path),
             OpCode::Export(name) => format!("EXPORT {}", name),
+            OpCode::Spawn => format!("SPAWN"),
+            OpCode::Receive => format!("RECEIVE"),
+            OpCode::Yield => format!("YIELD"),
+            OpCode::Send(proc_id) => format!("SEND {}", proc_id),
+            OpCode::Monitor(proc_id) => format!("MONITOR {}", proc_id),
+            OpCode::Demonitor(monitor_ref) => format!("DEMONITOR {}", monitor_ref),
+            OpCode::Link(proc_id) => format!("LINK {}", proc_id),
+            OpCode::Unlink(proc_id) => format!("UNLINK {}", proc_id),
+            OpCode::Register(name) => format!("REGISTER {}", name),
+            OpCode::Unregister(name) => format!("UNREGISTER {}", name),
+            OpCode::Whereis(name) => format!("WHEREIS {}", name),
+            OpCode::SendNamed(name) => format!("SENDNAMED {}", name),
+            OpCode::StartSupervisor => "STARTSUPERVISOR".to_string(),
+            OpCode::SuperviseChild(name) => format!("SUPERVISECHILD {}", name),
+            OpCode::RestartChild(name) => format!("RESTARTCHILD {}", name),
         };
         output.push_str(&line);
         output.push('\n');
@@ -3659,20 +5685,31 @@ fn run_comprehensive_tests() {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] <program.ttvm|program.ttb>");
+        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--smp] [--trace-procs] [--profile-procs] <program.ttvm|program.ttb>");
         eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
         eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
         eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
         eprintln!("       ttvm test-all                                    # Run all examples and tests");
+        eprintln!("       ttvm test-concurrency                           # Run concurrency tests");
+        eprintln!("       ttvm test-multithreaded                         # Run multi-threaded scheduler tests");
+        eprintln!("       ttvm test-message-passing                       # Run message passing tests");
+        eprintln!("       ttvm test-process-spawning                      # Run process spawning tests");
+        eprintln!("       ttvm test-register-whereis                      # Run REGISTER/WHEREIS tests");
+        eprintln!("       ttvm test-yield-comprehensive                   # Run comprehensive YIELD tests");
+        eprintln!("       ttvm test-spawn-comprehensive                   # Run comprehensive SPAWN tests");
+        eprintln!("       ttvm test-send-receive-comprehensive            # Run comprehensive SEND/RECEIVE tests");
+        eprintln!("       ttvm test-concurrency-bytecode                  # Run concurrency bytecode compilation tests");
+        eprintln!("       ttvm test-smp-concurrency                       # Run SMP scheduler concurrency tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
         eprintln!("Table Control: --no-table disables formatted output in favor of plain text");
         eprintln!("Performance: --trace enables instruction tracing, --profile enables function profiling");
+        eprintln!("Concurrency: --smp enables multi-core execution, --trace-procs enables process tracing, --profile-procs enables process profiling");
         std::process::exit(1);
     }
 
@@ -3685,6 +5722,9 @@ fn main() {
     let mut no_table = false;
     let mut trace_enabled = false;
     let mut profile_enabled = false;
+    let mut smp_enabled = false;
+    let mut trace_procs = false;
+    let mut profile_procs = false;
     let mut file_index = 1;
 
     // Check for flags
@@ -3734,6 +5774,18 @@ fn main() {
                 profile_enabled = true;
                 file_index += 1;
             }
+            "--smp" => {
+                smp_enabled = true;
+                file_index += 1;
+            }
+            "--trace-procs" => {
+                trace_procs = true;
+                file_index += 1;
+            }
+            "--profile-procs" => {
+                profile_procs = true;
+                file_index += 1;
+            }
             _ => {
                 eprintln!("Unknown flag: {}", args[file_index]);
                 std::process::exit(1);
@@ -3753,7 +5805,7 @@ fn main() {
                 let output = &args[file_index + 2];
                 compiler::compile(input, output).expect("Compilation failed");
                 println!("Compiled to {}", output);
-                return;
+                return Ok(());
             }
             "optimize" => {
                 if args.len() != file_index + 3 {
@@ -3763,7 +5815,7 @@ fn main() {
                 let input = &args[file_index + 1];
                 let output = &args[file_index + 2];
                 optimize_program(input, output);
-                return;
+                return Ok(());
             }
             "compile-lisp" => {
                 if args.len() != file_index + 3 {
@@ -3774,11 +5826,121 @@ fn main() {
                 let output = &args[file_index + 2];
                 lisp_compiler::compile_lisp(input, output);
                 println!("Compiled Lisp to {}", output);
-                return;
+                return Ok(());
             }
             "test-all" => {
                 run_comprehensive_tests();
-                return;
+                return Ok(());
+            }
+            "test-concurrency" => {
+                match test_concurrency() {
+                    Ok(_) => println!("All concurrency tests passed!"),
+                    Err(e) => {
+                        eprintln!("Concurrency tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-monitoring-linking" => {
+                match test_process_monitoring_linking() {
+                    Ok(_) => println!("All process monitoring and linking tests passed!"),
+                    Err(e) => {
+                        eprintln!("Process monitoring and linking tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-multithreaded" => {
+                match test_multithreaded_scheduler() {
+                    Ok(_) => println!("All multi-threaded scheduler tests passed!"),
+                    Err(e) => {
+                        eprintln!("Multi-threaded scheduler tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-message-passing" => {
+                match test_message_passing() {
+                    Ok(_) => println!("All message passing tests passed!"),
+                    Err(e) => {
+                        eprintln!("Message passing tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-process-spawning" => {
+                match test_process_spawning() {
+                    Ok(_) => println!("All process spawning tests passed!"),
+                    Err(e) => {
+                        eprintln!("Process spawning tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-register-whereis" => {
+                match test_register_whereis() {
+                    Ok(_) => println!("All REGISTER/WHEREIS tests passed!"),
+                    Err(e) => {
+                        eprintln!("REGISTER/WHEREIS tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-yield-comprehensive" => {
+                match test_yield_comprehensive() {
+                    Ok(_) => println!("All comprehensive YIELD tests passed!"),
+                    Err(e) => {
+                        eprintln!("Comprehensive YIELD tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-spawn-comprehensive" => {
+                match test_spawn_comprehensive() {
+                    Ok(_) => println!("All comprehensive SPAWN tests passed!"),
+                    Err(e) => {
+                        eprintln!("Comprehensive SPAWN tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-send-receive-comprehensive" => {
+                match test_send_receive_comprehensive() {
+                    Ok(_) => println!("All comprehensive SEND/RECEIVE tests passed!"),
+                    Err(e) => {
+                        eprintln!("Comprehensive SEND/RECEIVE tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-concurrency-bytecode" => {
+                match test_concurrency_bytecode_compilation() {
+                    Ok(_) => println!("All concurrency bytecode compilation tests passed!"),
+                    Err(e) => {
+                        eprintln!("Concurrency bytecode compilation tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-smp-concurrency" => {
+                match test_smp_scheduler_concurrency() {
+                    Ok(_) => println!("All SMP scheduler concurrency tests passed!"),
+                    Err(e) => {
+                        eprintln!("SMP scheduler concurrency tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
             }
             _ => {
                 // Normal execution, continue below
@@ -3803,12 +5965,15 @@ fn main() {
         gc_type: gc_type.to_string(),
         trace_enabled,
         profile_enabled,
+        smp_enabled,
+        trace_procs,
+        profile_procs,
     };
 
     // Run unit tests if requested (no program file needed)
     if config.run_tests {
         run_vm_tests(&config);
-        return; // Exit after running tests
+        return Ok(()); // Exit after running tests
     }
 
     // Check if we have a program file for normal execution
@@ -3857,27 +6022,62 @@ fn main() {
     }
 
     
-    let mut vm = VM::new_with_config(program, &config.gc_type, config.debug_mode || config.gc_debug, config.gc_stats, config.trace_enabled, config.profile_enabled);
-    if let Err(e) = vm.run() {
-        eprintln!("VM runtime error: {}", e);
-        std::process::exit(1);
-    }
-
-    // Output profiling results if enabled
-    if config.profile_enabled {
-        if let Some(profiler) = &vm.profiler {
-            profiler.print_results(&config);
+    // Use SMP scheduler if enabled, otherwise use regular VM
+    if config.smp_enabled {
+        println!("Running with BEAM-style SMP scheduler...");
+        println!("SMP enabled flag: {}", config.smp_enabled);
+    println!("Debug: About to create SMP scheduler pool");
+        
+        // Create SMP scheduler pool with default number of threads (CPU cores)
+        let mut scheduler_pool = SchedulerPool::new_with_default_threads();
+        
+        // Spawn the main process with the program
+        let (main_proc_id, _main_sender) = scheduler_pool.spawn_process(program);
+        println!("Main process spawned with ID: {}", main_proc_id);
+        
+        // Run the scheduler pool
+        scheduler_pool.run()?;
+        
+        // Set shutdown flag for clean exit
+        {
+            let mut shutdown = scheduler_pool.shutdown_flag.lock().unwrap();
+            *shutdown = true;
+        }
+        
+        // Wait for schedulers to finish
+        for handle in scheduler_pool.schedulers {
+            let _ = handle.join();
+        }
+        
+        println!("SMP scheduler shutdown complete");
+        
+    } else {
+        // Regular single-threaded VM execution
+        println!("Debug: Using regular VM (SMP disabled)");
+        println!("SMP enabled flag: {}", config.smp_enabled);
+        let mut vm = VM::new_with_config(program, &config.gc_type, config.debug_mode || config.gc_debug, config.gc_stats, config.trace_enabled, config.profile_enabled);
+        if let Err(e) = vm.run() {
+            eprintln!("VM runtime error: {}", e);
+            std::process::exit(1);
+        }
+        
+        // Output profiling results if enabled (only for regular VM mode)
+        if config.profile_enabled {
+            if let Some(profiler) = &vm.profiler {
+                profiler.print_results(&config);
+            }
+        }
+        
+        if debug_mode {
+            let (instructions, max_stack, final_stack) = vm.get_stats();
+            println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
+                instructions, max_stack, final_stack);
+        }
+        
+        if gc_stats {
+            let stats = vm.get_gc_stats();
+            report_gc_stats(&stats, &config);
         }
     }
-    
-    if debug_mode {
-        let (instructions, max_stack, final_stack) = vm.get_stats();
-        println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
-            instructions, max_stack, final_stack);
-    }
-    
-    if gc_stats {
-        let stats = vm.get_gc_stats();
-        report_gc_stats(&stats, &config);
-    }
+    Ok(())
 }

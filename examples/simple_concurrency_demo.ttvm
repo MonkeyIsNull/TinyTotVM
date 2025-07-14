@@ -1,0 +1,24 @@
+; Simple concurrency demonstration
+; Shows basic OpCode usage without complex inter-process communication
+
+PUSH_STR "=== Simple Concurrency Demo ==="
+PRINT
+
+; Test REGISTER and WHEREIS
+REGISTER "demo_process"
+PUSH_STR "Process registered as 'demo_process'"
+PRINT
+
+WHEREIS "demo_process"
+PRINT  ; Should print our PID
+
+; Test YIELD
+PUSH_STR "Testing YIELD..."
+PRINT
+YIELD
+PUSH_STR "YIELD completed"
+PRINT
+
+PUSH_STR "Demo completed"
+PRINT
+HALT

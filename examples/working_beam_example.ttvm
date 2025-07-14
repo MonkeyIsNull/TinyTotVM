@@ -1,0 +1,49 @@
+; Working BEAM-style example using current implementation
+; This demonstrates real process spawning and communication
+
+PUSH_STR "=== BEAM-Style Process Communication Example ==="
+PRINT
+
+; Register main process with name
+REGISTER "main_process"
+PUSH_STR "Main process registered as 'main_process'"
+PRINT
+
+; Step 1: Spawn a hello_world process
+PUSH_STR "Spawning hello_world process..."
+PRINT
+PUSH_STR "hello_world"
+SPAWN
+PRINT  ; This will print the spawned process ID
+
+; Step 2: Spawn a counter process
+PUSH_STR "Spawning counter process..."
+PRINT
+PUSH_STR "counter"
+SPAWN
+PRINT  ; This will print the spawned process ID
+
+; Step 3: Test name registry
+PUSH_STR "Looking up main_process..."
+PRINT
+WHEREIS "main_process"
+PRINT  ; Should print our PID
+
+; Step 4: Send a message to self
+PUSH_STR "Sending message to self..."
+PRINT
+PUSH_STR "Hello from main process"
+SEND 1
+PUSH_STR "Message sent successfully"
+PRINT
+
+; Step 5: Yield to allow other processes to run
+PUSH_STR "Yielding to other processes..."
+PRINT
+YIELD
+PUSH_STR "Back in main process after yield"
+PRINT
+
+PUSH_STR "BEAM example completed successfully"
+PRINT
+HALT

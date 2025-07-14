@@ -22,6 +22,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 - **Performance**: Pre-allocated stacks, instruction counting, advanced optimization engine
 - **Pluggable GC**: Multiple garbage collection engines with runtime selection
 - **Testing**: 67 comprehensive tests with color-coded formatted output
+- **BEAM-Style Concurrency**: Actor model with process monitoring, linking, supervision trees, and named processes
 
 ## Quick Start
 
@@ -48,6 +49,9 @@ ttvm --profile --trace examples/simple_profiling_test.ttvm
 
 # With garbage collection options
 ttvm --gc mark-sweep --gc-stats examples/showcase.ttvm
+
+# With BEAM-style concurrency (SMP scheduler)
+ttvm --smp examples/showcase.ttvm
 ```
 
 ### Profiling and Tracing
@@ -113,6 +117,7 @@ For detailed information, see:
 - **[Optimization Guide](docs/OPTIMIZATION.md)** - Advanced optimization engine and performance
 - **[Examples Guide](docs/EXAMPLES.md)** - Complete walkthrough of example programs
 - **[Architecture Documentation](docs/ARCHITECTURE.md)** - VM design and implementation details
+- **[BEAM-Style Concurrency Guide](docs/CONCURRENCY.md)** - Complete SMP scheduler, process isolation, and fault tolerance
 
 ## Example Programs
 
@@ -126,6 +131,7 @@ The `examples/` directory contains 67 comprehensive test programs demonstrating 
 - **`exception_test.ttvm`** - Exception handling examples
 - **`stdlib_comprehensive_test.ttvm`** - Complete standard library showcase
 - **`complete_optimization_showcase.ttvm`** - All 8 optimization passes
+- **`concurrency_test.ttvm`** - BEAM-style concurrency with YIELD instruction
 
 ## Command Line Options
 
@@ -142,9 +148,17 @@ OPTIONS:
   --profile            Enable function performance profiling
   --run-tests          Run built-in unit tests
   --no-table           Use plain text output instead of formatted tables
+  --smp                Enable BEAM-style concurrency with SMP scheduler
 
 COMMANDS:
   ttvm test-all                           # Run all example tests
+  ttvm test-concurrency                   # Test concurrency features
+  ttvm test-register-whereis              # Test REGISTER and WHEREIS opcodes
+  ttvm test-yield-comprehensive           # Test YIELD opcode thoroughly
+  ttvm test-spawn-comprehensive           # Test SPAWN opcode
+  ttvm test-send-receive-comprehensive    # Test SEND/RECEIVE message passing
+  ttvm test-concurrency-bytecode         # Test bytecode compilation of concurrency
+  ttvm test-smp-concurrency              # Test SMP scheduler with concurrency
   ttvm optimize <input> <output>          # Optimize and save program
   ttvm compile <input.ttvm> <output.ttb>  # Compile to bytecode
   ttvm compile-lisp <input.lisp> <output.ttvm>  # Transpile Lisp
