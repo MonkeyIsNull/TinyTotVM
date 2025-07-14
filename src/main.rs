@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fmt;
 use std::time::{Duration, Instant};
@@ -69,6 +69,10 @@ pub enum Message {
     Value(Value),
     Signal(String),
     Exit(ProcId),
+    Monitor(ProcId, String), // Monitor request: (target_pid, monitor_ref)
+    Down(ProcId, String, String), // Down message: (monitored_pid, monitor_ref, reason)
+    Link(ProcId), // Link request
+    Unlink(ProcId), // Unlink request
 }
 
 #[derive(Debug)]
@@ -82,6 +86,10 @@ pub struct TinyProc {
     pub message_sender: Option<Arc<dyn MessageSender>>,
     pub process_spawner: Option<Arc<dyn ProcessSpawner>>,
     pub waiting_for_message: bool,
+    pub monitors: HashMap<String, ProcId>, // monitor_ref -> monitored_pid
+    pub monitored_by: HashMap<ProcId, String>, // monitoring_pid -> monitor_ref
+    pub linked_processes: HashSet<ProcId>, // bidirectional links
+    pub exit_reason: Option<String>, // reason for exit
     // VM state (isolated per process)
     pub stack: Vec<Value>,
     pub instructions: Vec<OpCode>,
@@ -547,7 +555,7 @@ impl SingleThreadScheduler {
                 let mut proc = proc_arc.lock().unwrap();
                 
                 match proc.state {
-                    ProcState::Ready | ProcState::Waiting => {
+                    ProcState::Ready => {
                         let new_state = proc.run_until_yield()?;
                         
                         match new_state {
@@ -555,11 +563,26 @@ impl SingleThreadScheduler {
                                 processes_to_remove.push(i);
                             }
                             ProcState::Waiting => {
-                                proc.state = ProcState::Ready; // Reset for next round
+                                // Process yielded - either out of reductions or manual yield
+                                // Set to Ready for next round
+                                proc.state = ProcState::Ready;
                                 active_processes = true;
                             }
                             _ => active_processes = true,
                         }
+                    }
+                    ProcState::Waiting => {
+                        // Process was waiting for a message, check if it has one now
+                        if proc.waiting_for_message && proc.has_messages() {
+                            proc.waiting_for_message = false;
+                            proc.state = ProcState::Ready;
+                            active_processes = true;
+                        } else if !proc.waiting_for_message {
+                            // Process was just yielding, set to Ready for next round
+                            proc.state = ProcState::Ready;
+                            active_processes = true;
+                        }
+                        // If still waiting for message and no messages available, leave as Waiting
                     }
                     ProcState::Exited => {
                         processes_to_remove.push(i);
@@ -734,6 +757,67 @@ pub fn test_message_passing() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// Process monitoring and linking test function
+pub fn test_process_monitoring_linking() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing process monitoring and linking...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // First spawn the monitored process
+    let monitored_process_instructions = vec![
+        OpCode::PushStr("Monitored process starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield,  // Let other processes monitor/link
+        OpCode::Yield,  // Give more time for setup
+        OpCode::PushStr("Monitored process about to exit".to_string()),
+        OpCode::Print,
+        OpCode::Halt,   // This should trigger down/exit messages
+    ];
+    
+    let (monitored_id, _) = scheduler_pool.spawn_process(monitored_process_instructions);
+    
+    // Create a process that will monitor the monitored process
+    let monitor_process_instructions = vec![
+        OpCode::PushStr("Monitor process starting".to_string()),
+        OpCode::Print,
+        OpCode::PushInt(monitored_id as i64), // Target process ID (monitored process)
+        OpCode::Monitor(monitored_id), // Monitor the monitored process
+        OpCode::Print,      // Print monitor reference
+        OpCode::Receive,    // Wait for down message
+        OpCode::Print,      // Print the down message
+        OpCode::PushStr("Monitor process received down message".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a process that will link to the monitored process
+    let link_process_instructions = vec![
+        OpCode::PushStr("Link process starting".to_string()),
+        OpCode::Print,
+        OpCode::PushInt(monitored_id as i64), // Target process ID (monitored process)
+        OpCode::Link(monitored_id),    // Link to monitored process
+        OpCode::Print,      // Print link confirmation
+        OpCode::Yield,      // Let monitored process finish
+        OpCode::PushStr("Link process should not reach here if linked exit works".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn monitor and link processes
+    let (monitor_id, _) = scheduler_pool.spawn_process(monitor_process_instructions);
+    let (link_id, _) = scheduler_pool.spawn_process(link_process_instructions);
+    
+    println!("Spawned monitor process: {}, monitored process: {}, link process: {}", 
+             monitor_id, monitored_id, link_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Process monitoring and linking test completed!");
+    Ok(())
+}
+
 // Process spawning test function
 pub fn test_process_spawning() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing process spawning...");
@@ -785,6 +869,10 @@ impl TinyProc {
             message_sender: None, // Will be set by scheduler
             process_spawner: None, // Will be set by scheduler
             waiting_for_message: false,
+            monitors: HashMap::new(),
+            monitored_by: HashMap::new(),
+            linked_processes: HashSet::new(),
+            exit_reason: None,
             
             // Initialize VM state
             stack: Vec::new(),
@@ -826,6 +914,66 @@ impl TinyProc {
         !self.mailbox.is_empty()
     }
     
+    pub fn monitor_process(&mut self, target_pid: ProcId) -> String {
+        let monitor_ref = format!("mon_{}_{}", self.id, target_pid);
+        self.monitors.insert(monitor_ref.clone(), target_pid);
+        monitor_ref
+    }
+    
+    pub fn demonitor_process(&mut self, monitor_ref: &str) -> Option<ProcId> {
+        self.monitors.remove(monitor_ref)
+    }
+    
+    pub fn link_process(&mut self, target_pid: ProcId) {
+        self.linked_processes.insert(target_pid);
+    }
+    
+    pub fn unlink_process(&mut self, target_pid: ProcId) {
+        self.linked_processes.remove(&target_pid);
+    }
+    
+    pub fn add_monitor(&mut self, monitoring_pid: ProcId, monitor_ref: String) {
+        self.monitored_by.insert(monitoring_pid, monitor_ref);
+    }
+    
+    pub fn remove_monitor(&mut self, monitoring_pid: ProcId) -> Option<String> {
+        self.monitored_by.remove(&monitoring_pid)
+    }
+    
+    pub fn set_exit_reason(&mut self, reason: String) {
+        self.exit_reason = Some(reason);
+    }
+    
+    // Handle process exit by sending appropriate signals and cleanup
+    pub fn handle_process_exit(&mut self, reason: String) {
+        self.set_exit_reason(reason.clone());
+        self.state = ProcState::Exited;
+        
+        // Send down messages to all monitors
+        for (monitor_ref, monitored_pid) in self.monitors.iter() {
+            if let Some(sender) = &self.message_sender {
+                let down_msg = Message::Down(self.id, monitor_ref.clone(), reason.clone());
+                let _ = sender.send_message(*monitored_pid, down_msg);
+            }
+        }
+        
+        // Send down messages to all processes monitoring this one
+        for (monitoring_pid, monitor_ref) in self.monitored_by.iter() {
+            if let Some(sender) = &self.message_sender {
+                let down_msg = Message::Down(self.id, monitor_ref.clone(), reason.clone());
+                let _ = sender.send_message(*monitoring_pid, down_msg);
+            }
+        }
+        
+        // Send exit signals to all linked processes
+        for linked_pid in self.linked_processes.iter() {
+            if let Some(sender) = &self.message_sender {
+                let exit_msg = Message::Exit(self.id);
+                let _ = sender.send_message(*linked_pid, exit_msg);
+            }
+        }
+    }
+    
     pub fn has_reductions_left(&self) -> bool {
         self.reduction_count < self.max_reductions
     }
@@ -840,7 +988,7 @@ impl TinyProc {
     
     pub fn step(&mut self) -> VMResult<bool> {
         if self.ip >= self.instructions.len() {
-            self.state = ProcState::Exited;
+            self.handle_process_exit("normal".to_string());
             return Ok(false); // Process is done
         }
         
@@ -928,7 +1076,7 @@ impl TinyProc {
                 }
             }
             OpCode::Halt => {
-                self.state = ProcState::Exited;
+                self.handle_process_exit("normal".to_string());
                 // Don't advance IP for Halt - process is done
                 return Ok(());
             }
@@ -985,7 +1133,37 @@ impl TinyProc {
                         match msg {
                             Message::Value(val) => self.stack.push(val),
                             Message::Signal(sig) => self.stack.push(Value::Str(sig)),
-                            Message::Exit(pid) => self.stack.push(Value::Int(pid as i64)),
+                            Message::Exit(pid) => {
+                                // Handle exit signal from linked process
+                                if self.linked_processes.contains(&pid) {
+                                    // In BEAM, linked processes normally exit when receiving exit signals
+                                    // For now, we'll implement basic exit propagation
+                                    self.handle_process_exit(format!("exit_from_{}", pid));
+                                    return Ok(());
+                                } else {
+                                    // Not linked, just treat as regular message
+                                    self.stack.push(Value::Int(pid as i64));
+                                }
+                            }
+                            Message::Monitor(pid, monitor_ref) => {
+                                // Handle monitor request
+                                self.add_monitor(pid, monitor_ref.clone());
+                                self.stack.push(Value::Str(format!("monitor:{}", monitor_ref)));
+                            }
+                            Message::Down(pid, monitor_ref, reason) => {
+                                // Handle down message
+                                self.stack.push(Value::Str(format!("down:{}:{}:{}", pid, monitor_ref, reason)));
+                            }
+                            Message::Link(pid) => {
+                                // Handle link request
+                                self.link_process(pid);
+                                self.stack.push(Value::Str(format!("linked:{}", pid)));
+                            }
+                            Message::Unlink(pid) => {
+                                // Handle unlink request
+                                self.unlink_process(pid);
+                                self.stack.push(Value::Str(format!("unlinked:{}", pid)));
+                            }
                         }
                     }
                     Err(_) => {
@@ -1034,6 +1212,98 @@ impl TinyProc {
                     }
                 } else {
                     eprintln!("No message sender available for process {}", self.id);
+                }
+            }
+            OpCode::Monitor(target_proc_id) => {
+                // Monitor a process - add it to our monitors list
+                let monitor_ref = self.monitor_process(*target_proc_id);
+                
+                // Send monitor request to the scheduler
+                if let Some(sender) = &self.message_sender {
+                    let monitor_msg = Message::Monitor(self.id, monitor_ref.clone());
+                    match sender.send_message(*target_proc_id, monitor_msg) {
+                        Ok(_) => {
+                            // Push monitor reference to stack for use by the process
+                            self.stack.push(Value::Str(monitor_ref));
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send monitor request to process {}: {}", target_proc_id, e);
+                            // Remove from monitors if sending failed
+                            self.demonitor_process(&monitor_ref);
+                            self.stack.push(Value::Str("monitor_failed".to_string()));
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                    self.stack.push(Value::Str("monitor_failed".to_string()));
+                }
+            }
+            OpCode::Demonitor(monitor_ref) => {
+                // Stop monitoring a process
+                if let Some(target_proc_id) = self.demonitor_process(monitor_ref) {
+                    // Send demonitor request to the target process
+                    if let Some(sender) = &self.message_sender {
+                        let demonitor_msg = Message::Monitor(self.id, format!("stop_{}", monitor_ref));
+                        match sender.send_message(target_proc_id, demonitor_msg) {
+                            Ok(_) => {
+                                self.stack.push(Value::Str("demonitor_success".to_string()));
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to send demonitor request to process {}: {}", target_proc_id, e);
+                                self.stack.push(Value::Str("demonitor_failed".to_string()));
+                            }
+                        }
+                    } else {
+                        eprintln!("No message sender available for process {}", self.id);
+                        self.stack.push(Value::Str("demonitor_failed".to_string()));
+                    }
+                } else {
+                    // Monitor reference not found
+                    self.stack.push(Value::Str("monitor_not_found".to_string()));
+                }
+            }
+            OpCode::Link(target_proc_id) => {
+                // Link to a process - bidirectional link
+                self.link_process(*target_proc_id);
+                
+                // Send link request to the target process
+                if let Some(sender) = &self.message_sender {
+                    let link_msg = Message::Link(self.id);
+                    match sender.send_message(*target_proc_id, link_msg) {
+                        Ok(_) => {
+                            self.stack.push(Value::Str(format!("linked_{}", target_proc_id)));
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send link request to process {}: {}", target_proc_id, e);
+                            // Remove link if sending failed
+                            self.unlink_process(*target_proc_id);
+                            self.stack.push(Value::Str("link_failed".to_string()));
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                    self.stack.push(Value::Str("link_failed".to_string()));
+                }
+            }
+            OpCode::Unlink(target_proc_id) => {
+                // Unlink from a process
+                self.unlink_process(*target_proc_id);
+                
+                // Send unlink request to the target process
+                if let Some(sender) = &self.message_sender {
+                    let unlink_msg = Message::Unlink(self.id);
+                    match sender.send_message(*target_proc_id, unlink_msg) {
+                        Ok(_) => {
+                            self.stack.push(Value::Str(format!("unlinked_{}", target_proc_id)));
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send unlink request to process {}: {}", target_proc_id, e);
+                            self.stack.push(Value::Str("unlink_failed".to_string()));
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                    self.stack.push(Value::Str("unlink_failed".to_string()));
                 }
             }
             _ => {
@@ -1676,6 +1946,10 @@ enum OpCode {
     Receive,           // receive message from mailbox
     Yield,             // yield control to scheduler
     Send(ProcId),      // send message to process
+    Monitor(ProcId),   // monitor a process
+    Demonitor(String), // stop monitoring (using monitor reference)
+    Link(ProcId),      // link to a process
+    Unlink(ProcId),    // unlink from a process
 }
 
 // Garbage Collection Engine Trait
@@ -3844,6 +4118,22 @@ impl VM {
                     // For VM struct, not supported (use TinyProc instead)
                     return Err(VMError::UnsupportedOperation("SEND not supported in VM, use TinyProc scheduler".to_string()));
                 }
+                OpCode::Monitor(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("MONITOR not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Demonitor(_monitor_ref) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("DEMONITOR not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Link(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("LINK not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Unlink(_proc_id) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("UNLINK not supported in VM, use TinyProc scheduler".to_string()));
+                }
                 OpCode::Halt => {
                     // This should never be reached since HALT is handled in run()
                     unreachable!("HALT instruction should be handled in run() method")
@@ -4442,6 +4732,10 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::Receive => format!("RECEIVE"),
             OpCode::Yield => format!("YIELD"),
             OpCode::Send(proc_id) => format!("SEND {}", proc_id),
+            OpCode::Monitor(proc_id) => format!("MONITOR {}", proc_id),
+            OpCode::Demonitor(monitor_ref) => format!("DEMONITOR {}", monitor_ref),
+            OpCode::Link(proc_id) => format!("LINK {}", proc_id),
+            OpCode::Unlink(proc_id) => format!("UNLINK {}", proc_id),
         };
         output.push_str(&line);
         output.push('\n');
@@ -4845,6 +5139,16 @@ fn main() {
                     Ok(_) => println!("All concurrency tests passed!"),
                     Err(e) => {
                         eprintln!("Concurrency tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-monitoring-linking" => {
+                match test_process_monitoring_linking() {
+                    Ok(_) => println!("All process monitoring and linking tests passed!"),
+                    Err(e) => {
+                        eprintln!("Process monitoring and linking tests failed: {}", e);
                         std::process::exit(1);
                     }
                 }
