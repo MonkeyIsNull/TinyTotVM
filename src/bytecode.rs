@@ -115,6 +115,74 @@ pub fn load_bytecode(path: &str) -> std::io::Result<Vec<OpCode>> {
             0x0072 => OpCode::ReadFile,
             0x0073 => OpCode::WriteFile,
 
+            // Concurrency opcodes
+            0x0080 => OpCode::Spawn,
+            0x0081 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
+                ip += len;
+                OpCode::Register(s)
+            }
+            0x0082 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
+                ip += len;
+                OpCode::Unregister(s)
+            }
+            0x0083 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
+                ip += len;
+                OpCode::Whereis(s)
+            }
+            0x0084 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
+                ip += len;
+                OpCode::SendNamed(s)
+            }
+            0x0085 => {
+                let pid = u64::from_le_bytes(buffer[ip..ip + 8].try_into().unwrap());
+                ip += 8;
+                OpCode::Monitor(pid)
+            }
+            0x0086 => {
+                let pid = u64::from_le_bytes(buffer[ip..ip + 8].try_into().unwrap());
+                ip += 8;
+                OpCode::Link(pid)
+            }
+            0x0087 => {
+                let pid = u64::from_le_bytes(buffer[ip..ip + 8].try_into().unwrap());
+                ip += 8;
+                OpCode::Unlink(pid)
+            }
+            0x0088 => OpCode::StartSupervisor,
+            0x0089 => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
+                ip += len;
+                OpCode::SuperviseChild(s)
+            }
+            0x008A => {
+                let len = u16::from_le_bytes(buffer[ip..ip + 2].try_into().unwrap()) as usize;
+                ip += 2;
+                let s = String::from_utf8(buffer[ip..ip + len].to_vec()).unwrap();
+                ip += len;
+                OpCode::RestartChild(s)
+            }
+            0x008B => OpCode::Yield,
+            0x008C => OpCode::Receive,
+            0x008D => {
+                let pid = u64::from_le_bytes(buffer[ip..ip + 8].try_into().unwrap());
+                ip += 8;
+                OpCode::Send(pid)
+            }
+
             0x00FF => OpCode::Halt,
 
             _ => panic!("Unknown bytecode: 0x{:04X}", opcode),

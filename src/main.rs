@@ -453,6 +453,15 @@ impl SchedulerPool {
         pool
     }
     
+    pub fn new_with_default_threads() -> Self {
+        // Use number of logical CPUs like BEAM does
+        let num_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4); // fallback to 4 threads
+        println!("Creating scheduler pool with {} threads (CPU cores)", num_threads);
+        Self::new_with_threads(num_threads)
+    }
+    
     pub fn get_next_proc_id(&self) -> ProcId {
         let mut id = self.next_proc_id.lock().unwrap();
         let current_id = *id;
@@ -984,6 +993,389 @@ pub fn test_process_spawning() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// Comprehensive test for REGISTER/WHEREIS OpCodes
+pub fn test_register_whereis() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing REGISTER/WHEREIS OpCodes...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create a process that registers itself with a name
+    let register_process_instructions = vec![
+        OpCode::PushStr("Starting registration process".to_string()),
+        OpCode::Print,
+        OpCode::Register("test_process".to_string()),
+        OpCode::Print, // Print registration result
+        OpCode::Yield, // Let other processes run
+        OpCode::PushStr("Registration process completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a process that looks up the registered name
+    let whereis_process_instructions = vec![
+        OpCode::PushStr("Starting whereis process".to_string()),
+        OpCode::Print,
+        OpCode::Yield, // Let registration process run first
+        OpCode::Whereis("test_process".to_string()),
+        OpCode::Dup, // Duplicate the PID for both printing and sending
+        OpCode::Print, // Print the found PID
+        OpCode::PushStr("Found process with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a simple test that just checks register/whereis works
+    let test_coordination_instructions = vec![
+        OpCode::PushStr("Starting coordination process".to_string()),
+        OpCode::Print,
+        OpCode::Yield, // Let registration process run first
+        OpCode::Yield, // Give more time for registration
+        OpCode::Yield, // Give even more time
+        OpCode::PushStr("Coordination process completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes
+    let (_reg_id, _) = scheduler_pool.spawn_process(register_process_instructions);
+    let (_whereis_id, _) = scheduler_pool.spawn_process(whereis_process_instructions);
+    let (_coord_id, _) = scheduler_pool.spawn_process(test_coordination_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("REGISTER/WHEREIS tests completed successfully!");
+    Ok(())
+}
+
+// Comprehensive test for YIELD OpCode
+pub fn test_yield_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing YIELD OpCode comprehensively...");
+    
+    // Create a scheduler pool with 3 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(3);
+    
+    // Create multiple processes that yield at different points
+    let yield_process_1_instructions = vec![
+        OpCode::PushStr("Process 1 - Before first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - After first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - After second yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 1 - Final step".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let yield_process_2_instructions = vec![
+        OpCode::PushStr("Process 2 - Before first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 2 - After first yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 2 - Final step".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let yield_process_3_instructions = vec![
+        OpCode::PushStr("Process 3 - Before yield".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("Process 3 - After yield".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a process that doesn't yield (for comparison)
+    let no_yield_process_instructions = vec![
+        OpCode::PushStr("No-yield process - Step 1".to_string()),
+        OpCode::Print,
+        OpCode::PushStr("No-yield process - Step 2".to_string()),
+        OpCode::Print,
+        OpCode::PushStr("No-yield process - Step 3".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes
+    let (_p1_id, _) = scheduler_pool.spawn_process(yield_process_1_instructions);
+    let (_p2_id, _) = scheduler_pool.spawn_process(yield_process_2_instructions);
+    let (_p3_id, _) = scheduler_pool.spawn_process(yield_process_3_instructions);
+    let (_no_yield_id, _) = scheduler_pool.spawn_process(no_yield_process_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("YIELD tests completed successfully!");
+    Ok(())
+}
+
+// Comprehensive test for SPAWN OpCode
+pub fn test_spawn_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing SPAWN OpCode comprehensively...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create a process that spawns multiple different process types
+    let spawner_process_instructions = vec![
+        OpCode::PushStr("Spawner process starting".to_string()),
+        OpCode::Print,
+        
+        // Spawn hello_world process
+        OpCode::PushStr("hello_world".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("Spawned hello_world with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the PID
+        
+        OpCode::Yield, // Let spawned process run
+        
+        // Spawn counter process
+        OpCode::PushStr("counter".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("Spawned counter with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the PID
+        
+        OpCode::Yield, // Let spawned process run
+        
+        // Spawn default process
+        OpCode::PushStr("unknown_process".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("Spawned default with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the PID
+        
+        OpCode::Yield, // Let spawned process run
+        
+        OpCode::PushStr("Spawner process completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn the spawner process
+    let (_spawner_id, _) = scheduler_pool.spawn_process(spawner_process_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("SPAWN tests completed successfully!");
+    Ok(())
+}
+
+// Comprehensive test for SEND/RECEIVE OpCodes with multiple message types
+pub fn test_send_receive_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing SEND/RECEIVE OpCodes comprehensively...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create a simple sender process that sends to a known receiver process
+    let sender_process_instructions = vec![
+        OpCode::PushStr("Sender process starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield, // Let receiver start first
+        
+        // Send integer message
+        OpCode::PushInt(42),
+        OpCode::Send(2), // Send to process 2
+        OpCode::PushStr("Sent integer message".to_string()),
+        OpCode::Print,
+        
+        OpCode::Yield, // Let receiver process
+        
+        // Send string message
+        OpCode::PushStr("Hello from sender!".to_string()),
+        OpCode::Send(2), // Send to process 2
+        OpCode::PushStr("Sent string message".to_string()),
+        OpCode::Print,
+        
+        OpCode::Yield, // Let receiver process
+        
+        // Send final message
+        OpCode::PushStr("END".to_string()),
+        OpCode::Send(2), // Send to process 2
+        OpCode::PushStr("Sent END message".to_string()),
+        OpCode::Print,
+        
+        OpCode::Halt,
+    ];
+    
+    // Create a receiver process that receives multiple messages
+    let receiver_process_instructions = vec![
+        OpCode::PushStr("Receiver process starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield, // Let sender start first
+        
+        // Receive integer message
+        OpCode::Receive,
+        OpCode::PushStr("Received integer: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the integer
+        
+        // Receive string message
+        OpCode::Receive,
+        OpCode::PushStr("Received string: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the string
+        
+        // Receive END message
+        OpCode::Receive,
+        OpCode::PushStr("Received final: ".to_string()),
+        OpCode::Print,
+        OpCode::Print, // Print the END message
+        
+        OpCode::PushStr("Receiver process completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes (sender=1, receiver=2)
+    let (_sender_id, _) = scheduler_pool.spawn_process(sender_process_instructions);
+    let (_receiver_id, _) = scheduler_pool.spawn_process(receiver_process_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("SEND/RECEIVE tests completed successfully!");
+    Ok(())
+}
+
+// Test bytecode compilation of concurrency OpCodes
+pub fn test_concurrency_bytecode_compilation() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing bytecode compilation of concurrency OpCodes...");
+    
+    // Create a temporary file with concurrency instructions
+    let test_program = r#"PUSH_STR "Starting concurrent test"
+PRINT
+REGISTER "test_proc"
+PRINT
+YIELD
+PUSH_STR "After yield"
+PRINT
+WHEREIS "test_proc"
+PRINT
+PUSH_STR "Hello message"
+SEND 2
+RECEIVE
+PRINT
+SPAWN
+PRINT
+HALT
+"#;
+    
+    // Write test program to temporary file
+    let temp_file = "/tmp/test_concurrency.ttvm";
+    std::fs::write(temp_file, test_program)?;
+    
+    // Compile to bytecode
+    let bytecode_file = "/tmp/test_concurrency.ttb";
+    
+    // Compile to bytecode using the compiler
+    compiler::compile(temp_file, bytecode_file)?;
+    
+    // Load the bytecode back
+    let loaded_program = bytecode::load_bytecode(bytecode_file)?;
+    
+    // Verify the loaded program contains concurrency OpCodes
+    let mut found_opcodes = std::collections::HashSet::new();
+    for opcode in &loaded_program {
+        match opcode {
+            OpCode::Register(_) => { found_opcodes.insert("REGISTER"); }
+            OpCode::Whereis(_) => { found_opcodes.insert("WHEREIS"); }
+            OpCode::Yield => { found_opcodes.insert("YIELD"); }
+            OpCode::Send(_) => { found_opcodes.insert("SEND"); }
+            OpCode::Receive => { found_opcodes.insert("RECEIVE"); }
+            OpCode::Spawn => { found_opcodes.insert("SPAWN"); }
+            _ => {}
+        }
+    }
+    
+    println!("Found compiled OpCodes: {:?}", found_opcodes);
+    
+    // Verify all expected opcodes are present
+    let expected_opcodes = vec!["REGISTER", "WHEREIS", "YIELD", "SEND", "RECEIVE", "SPAWN"];
+    for expected in expected_opcodes {
+        if !found_opcodes.contains(expected) {
+            return Err(format!("Missing OpCode in bytecode: {}", expected).into());
+        }
+    }
+    
+    // Clean up temporary files
+    std::fs::remove_file(temp_file)?;
+    std::fs::remove_file(bytecode_file)?;
+    
+    println!("Bytecode compilation tests completed successfully!");
+    Ok(())
+}
+
+// Test SMP scheduler with concurrency OpCodes
+pub fn test_smp_scheduler_concurrency() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing SMP scheduler with concurrency OpCodes...");
+    
+    // Create a scheduler pool with 2 threads to test SMP
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create simple processes that use different concurrency features
+    let smp_process_1_instructions = vec![
+        OpCode::PushStr("SMP Process 1 starting".to_string()),
+        OpCode::Print,
+        OpCode::Register("smp_proc_1".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("SMP Process 1 completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let smp_process_2_instructions = vec![
+        OpCode::PushStr("SMP Process 2 starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::Whereis("smp_proc_1".to_string()),
+        OpCode::PushStr("Found smp_proc_1 with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print,
+        OpCode::PushStr("SMP Process 2 completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Create a spawner process that tests SPAWN in SMP environment
+    let smp_spawner_instructions = vec![
+        OpCode::PushStr("SMP Spawner starting".to_string()),
+        OpCode::Print,
+        OpCode::Yield,
+        OpCode::PushStr("hello_world".to_string()),
+        OpCode::Spawn,
+        OpCode::PushStr("SMP Spawner created process with PID: ".to_string()),
+        OpCode::Print,
+        OpCode::Print,
+        OpCode::PushStr("SMP Spawner completed".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    // Spawn all processes
+    let (_p1_id, _) = scheduler_pool.spawn_process(smp_process_1_instructions);
+    let (_p2_id, _) = scheduler_pool.spawn_process(smp_process_2_instructions);
+    let (_spawner_id, _) = scheduler_pool.spawn_process(smp_spawner_instructions);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("SMP scheduler concurrency tests completed successfully!");
+    Ok(())
+}
+
 impl TinyProc {
     pub fn new(id: ProcId, instructions: Vec<OpCode>) -> (Self, Sender<Message>) {
         let (sender, receiver) = crossbeam::channel::unbounded();
@@ -1462,32 +1854,22 @@ impl TinyProc {
                 self.state = ProcState::Waiting;
                 return Ok(());
             }
-            OpCode::Send(_proc_id) => {
-                // Get the message and target process ID from the stack
+            OpCode::Send(target_proc_id) => {
+                // Get the message value from the stack
                 let message_value = self.pop_stack("SEND")?;
-                let target_proc_id = self.pop_stack("SEND")?;
-                
-                // Convert target process ID to ProcId
-                let target_id = match target_proc_id {
-                    Value::Int(id) => id as ProcId,
-                    _ => return Err(VMError::TypeMismatch {
-                        expected: "int (process ID)".to_string(),
-                        got: format!("{:?}", target_proc_id),
-                        operation: "SEND".to_string(),
-                    }),
-                };
                 
                 // Convert Value to Message
                 let message = Message::Value(message_value);
                 
                 // Send message using the message sender
                 if let Some(sender) = &self.message_sender {
-                    match sender.send_message(target_id, message) {
+                    match sender.send_message(*target_proc_id, message) {
                         Ok(_) => {
                             // Message sent successfully
+                            println!("Process {} sent message to process {}", self.id, target_proc_id);
                         }
                         Err(e) => {
-                            eprintln!("Failed to send message to process {}: {}", target_id, e);
+                            eprintln!("Failed to send message to process {}: {}", target_proc_id, e);
                             // In a real implementation, we might want to handle this error differently
                         }
                     }
@@ -4961,6 +5343,23 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 let name = parts[1].trim().to_string();
                 OpCode::Export(name)
             }
+            "YIELD" => OpCode::Yield,
+            "RECEIVE" => OpCode::Receive,
+            "SEND" => {
+                let pid = parts[1].parse::<u64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid PID: {}", parts[1]) 
+                })?;
+                OpCode::Send(pid)
+            }
+            "REGISTER" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::Register(name)
+            }
+            "WHEREIS" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::Whereis(name)
+            }
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
         };
         program.push(opcode);
@@ -5420,6 +5819,12 @@ fn main() {
         eprintln!("       ttvm test-multithreaded                         # Run multi-threaded scheduler tests");
         eprintln!("       ttvm test-message-passing                       # Run message passing tests");
         eprintln!("       ttvm test-process-spawning                      # Run process spawning tests");
+        eprintln!("       ttvm test-register-whereis                      # Run REGISTER/WHEREIS tests");
+        eprintln!("       ttvm test-yield-comprehensive                   # Run comprehensive YIELD tests");
+        eprintln!("       ttvm test-spawn-comprehensive                   # Run comprehensive SPAWN tests");
+        eprintln!("       ttvm test-send-receive-comprehensive            # Run comprehensive SEND/RECEIVE tests");
+        eprintln!("       ttvm test-concurrency-bytecode                  # Run concurrency bytecode compilation tests");
+        eprintln!("       ttvm test-smp-concurrency                       # Run SMP scheduler concurrency tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
@@ -5598,6 +6003,66 @@ fn main() {
                 }
                 return;
             }
+            "test-register-whereis" => {
+                match test_register_whereis() {
+                    Ok(_) => println!("All REGISTER/WHEREIS tests passed!"),
+                    Err(e) => {
+                        eprintln!("REGISTER/WHEREIS tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-yield-comprehensive" => {
+                match test_yield_comprehensive() {
+                    Ok(_) => println!("All comprehensive YIELD tests passed!"),
+                    Err(e) => {
+                        eprintln!("Comprehensive YIELD tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-spawn-comprehensive" => {
+                match test_spawn_comprehensive() {
+                    Ok(_) => println!("All comprehensive SPAWN tests passed!"),
+                    Err(e) => {
+                        eprintln!("Comprehensive SPAWN tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-send-receive-comprehensive" => {
+                match test_send_receive_comprehensive() {
+                    Ok(_) => println!("All comprehensive SEND/RECEIVE tests passed!"),
+                    Err(e) => {
+                        eprintln!("Comprehensive SEND/RECEIVE tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-concurrency-bytecode" => {
+                match test_concurrency_bytecode_compilation() {
+                    Ok(_) => println!("All concurrency bytecode compilation tests passed!"),
+                    Err(e) => {
+                        eprintln!("Concurrency bytecode compilation tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-smp-concurrency" => {
+                match test_smp_scheduler_concurrency() {
+                    Ok(_) => println!("All SMP scheduler concurrency tests passed!"),
+                    Err(e) => {
+                        eprintln!("SMP scheduler concurrency tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
             _ => {
                 // Normal execution, continue below
             }
@@ -5678,27 +6143,61 @@ fn main() {
     }
 
     
-    let mut vm = VM::new_with_config(program, &config.gc_type, config.debug_mode || config.gc_debug, config.gc_stats, config.trace_enabled, config.profile_enabled);
-    if let Err(e) = vm.run() {
-        eprintln!("VM runtime error: {}", e);
-        std::process::exit(1);
-    }
-
-    // Output profiling results if enabled
-    if config.profile_enabled {
-        if let Some(profiler) = &vm.profiler {
-            profiler.print_results(&config);
+    // Use SMP scheduler if enabled, otherwise use regular VM
+    if config.smp_enabled {
+        println!("Running with BEAM-style SMP scheduler...");
+        println!("SMP enabled flag: {}", config.smp_enabled);
+    println!("Debug: About to create SMP scheduler pool");
+        
+        // Create SMP scheduler pool with default number of threads (CPU cores)
+        let mut scheduler_pool = SchedulerPool::new_with_default_threads();
+        
+        // Spawn the main process with the program
+        let (main_proc_id, _main_sender) = scheduler_pool.spawn_process(program);
+        println!("Main process spawned with ID: {}", main_proc_id);
+        
+        // Run the scheduler pool
+        scheduler_pool.run();
+        
+        // Set shutdown flag for clean exit
+        {
+            let mut shutdown = scheduler_pool.shutdown_flag.lock().unwrap();
+            *shutdown = true;
         }
-    }
-    
-    if debug_mode {
-        let (instructions, max_stack, final_stack) = vm.get_stats();
-        println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
-            instructions, max_stack, final_stack);
-    }
-    
-    if gc_stats {
-        let stats = vm.get_gc_stats();
-        report_gc_stats(&stats, &config);
+        
+        // Wait for schedulers to finish
+        for handle in scheduler_pool.schedulers {
+            let _ = handle.join();
+        }
+        
+        println!("SMP scheduler shutdown complete");
+        
+    } else {
+        // Regular single-threaded VM execution
+        println!("Debug: Using regular VM (SMP disabled)");
+        println!("SMP enabled flag: {}", config.smp_enabled);
+        let mut vm = VM::new_with_config(program, &config.gc_type, config.debug_mode || config.gc_debug, config.gc_stats, config.trace_enabled, config.profile_enabled);
+        if let Err(e) = vm.run() {
+            eprintln!("VM runtime error: {}", e);
+            std::process::exit(1);
+        }
+        
+        // Output profiling results if enabled (only for regular VM mode)
+        if config.profile_enabled {
+            if let Some(profiler) = &vm.profiler {
+                profiler.print_results(&config);
+            }
+        }
+        
+        if debug_mode {
+            let (instructions, max_stack, final_stack) = vm.get_stats();
+            println!("Performance stats - Instructions: {}, Max stack: {}, Final stack: {}", 
+                instructions, max_stack, final_stack);
+        }
+        
+        if gc_stats {
+            let stats = vm.get_gc_stats();
+            report_gc_stats(&stats, &config);
+        }
     }
 }

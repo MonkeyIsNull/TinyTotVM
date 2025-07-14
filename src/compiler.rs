@@ -48,6 +48,22 @@ enum ByteCode {
 
     ReadFile = 0x72,
     WriteFile = 0x73,
+    
+    // Concurrency opcodes
+    Spawn = 0x80,
+    Register = 0x81,
+    Unregister = 0x82,
+    Whereis = 0x83,
+    SendNamed = 0x84,
+    Monitor = 0x85,
+    Link = 0x86,
+    Unlink = 0x87,
+    StartSupervisor = 0x88,
+    SuperviseChild = 0x89,
+    RestartChild = 0x8A,
+    Yield = 0x8B,
+    Receive = 0x8C,
+    Send = 0x8D,
 }
 
 pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result<()> {
@@ -176,6 +192,74 @@ pub fn compile<P: AsRef<Path>>(input_path: P, output_path: P) -> std::io::Result
             "READ_FILE" => output.write_all(&(ByteCode::ReadFile as u16).to_le_bytes())?,
             "WRITE_FILE" => output.write_all(&(ByteCode::WriteFile as u16).to_le_bytes())?,
             "DUMPSCOPE" => output.write_all(&(ByteCode::DumpScope as u16).to_le_bytes())?,
+            
+            // Concurrency opcodes
+            "SPAWN" => output.write_all(&(ByteCode::Spawn as u16).to_le_bytes())?,
+            "REGISTER" => {
+                output.write_all(&(ByteCode::Register as u16).to_le_bytes())?;
+                let name = arg.unwrap().trim_matches('"');
+                let bytes = name.as_bytes();
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
+                output.write_all(bytes)?;
+            }
+            "UNREGISTER" => {
+                output.write_all(&(ByteCode::Unregister as u16).to_le_bytes())?;
+                let name = arg.unwrap().trim_matches('"');
+                let bytes = name.as_bytes();
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
+                output.write_all(bytes)?;
+            }
+            "WHEREIS" => {
+                output.write_all(&(ByteCode::Whereis as u16).to_le_bytes())?;
+                let name = arg.unwrap().trim_matches('"');
+                let bytes = name.as_bytes();
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
+                output.write_all(bytes)?;
+            }
+            "SEND_NAMED" => {
+                output.write_all(&(ByteCode::SendNamed as u16).to_le_bytes())?;
+                let name = arg.unwrap().trim_matches('"');
+                let bytes = name.as_bytes();
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
+                output.write_all(bytes)?;
+            }
+            "MONITOR" => {
+                output.write_all(&(ByteCode::Monitor as u16).to_le_bytes())?;
+                let pid: u64 = arg.unwrap().parse().expect("Invalid PID");
+                output.write_all(&pid.to_le_bytes())?;
+            }
+            "LINK" => {
+                output.write_all(&(ByteCode::Link as u16).to_le_bytes())?;
+                let pid: u64 = arg.unwrap().parse().expect("Invalid PID");
+                output.write_all(&pid.to_le_bytes())?;
+            }
+            "UNLINK" => {
+                output.write_all(&(ByteCode::Unlink as u16).to_le_bytes())?;
+                let pid: u64 = arg.unwrap().parse().expect("Invalid PID");
+                output.write_all(&pid.to_le_bytes())?;
+            }
+            "START_SUPERVISOR" => output.write_all(&(ByteCode::StartSupervisor as u16).to_le_bytes())?,
+            "SUPERVISE_CHILD" => {
+                output.write_all(&(ByteCode::SuperviseChild as u16).to_le_bytes())?;
+                let name = arg.unwrap().trim_matches('"');
+                let bytes = name.as_bytes();
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
+                output.write_all(bytes)?;
+            }
+            "RESTART_CHILD" => {
+                output.write_all(&(ByteCode::RestartChild as u16).to_le_bytes())?;
+                let name = arg.unwrap().trim_matches('"');
+                let bytes = name.as_bytes();
+                output.write_all(&(bytes.len() as u16).to_le_bytes())?;
+                output.write_all(bytes)?;
+            }
+            "YIELD" => output.write_all(&(ByteCode::Yield as u16).to_le_bytes())?,
+            "RECEIVE" => output.write_all(&(ByteCode::Receive as u16).to_le_bytes())?,
+            "SEND" => {
+                output.write_all(&(ByteCode::Send as u16).to_le_bytes())?;
+                let pid: u64 = arg.unwrap().parse().expect("Invalid PID");
+                output.write_all(&pid.to_le_bytes())?;
+            }
 
             _ => panic!("Unknown opcode: {}", op),
         }
