@@ -56,6 +56,14 @@ pub trait ProcessSpawner: Send + Sync + std::fmt::Debug {
     fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>);
 }
 
+// Trait for name registry operations
+pub trait NameRegistry: Send + Sync + std::fmt::Debug {
+    fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String>;
+    fn unregister_name(&self, name: &str) -> Result<(), String>;
+    fn whereis(&self, name: &str) -> Option<ProcId>;
+    fn send_to_named(&self, name: &str, message: Message) -> Result<(), String>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProcState {
     Ready,
@@ -85,6 +93,7 @@ pub struct TinyProc {
     pub max_reductions: usize,
     pub message_sender: Option<Arc<dyn MessageSender>>,
     pub process_spawner: Option<Arc<dyn ProcessSpawner>>,
+    pub name_registry: Option<Arc<dyn NameRegistry>>,
     pub waiting_for_message: bool,
     pub monitors: HashMap<String, ProcId>, // monitor_ref -> monitored_pid
     pub monitored_by: HashMap<ProcId, String>, // monitoring_pid -> monitor_ref
@@ -128,11 +137,13 @@ pub struct SchedulerPool {
     pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
     pub shutdown_flag: Arc<Mutex<bool>>,
     pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>, // name -> ProcId mapping
 }
 
 #[derive(Debug, Clone)]
 pub struct SchedulerPoolMessageSender {
     pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +152,7 @@ pub struct SchedulerPoolProcessSpawner {
     pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
     pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
     pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>,
     pub message_sender: Arc<dyn MessageSender>,
 }
 
@@ -321,6 +333,58 @@ impl MessageSender for SchedulerPoolMessageSender {
     }
 }
 
+impl NameRegistry for SchedulerPoolMessageSender {
+    fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        name_registry.insert(name, proc_id);
+        Ok(())
+    }
+    
+    fn unregister_name(&self, name: &str) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        match name_registry.remove(name) {
+            Some(_) => Ok(()),
+            None => Err(format!("Name '{}' not found", name))
+        }
+    }
+    
+    fn whereis(&self, name: &str) -> Option<ProcId> {
+        let name_registry = self.name_registry.lock().unwrap();
+        name_registry.get(name).copied()
+    }
+    
+    fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
+        let proc_id = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
+        self.send_message(proc_id, message)
+    }
+}
+
+impl NameRegistry for SchedulerPoolProcessSpawner {
+    fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        name_registry.insert(name, proc_id);
+        Ok(())
+    }
+    
+    fn unregister_name(&self, name: &str) -> Result<(), String> {
+        let mut name_registry = self.name_registry.lock().unwrap();
+        match name_registry.remove(name) {
+            Some(_) => Ok(()),
+            None => Err(format!("Name '{}' not found", name))
+        }
+    }
+    
+    fn whereis(&self, name: &str) -> Option<ProcId> {
+        let name_registry = self.name_registry.lock().unwrap();
+        name_registry.get(name).copied()
+    }
+    
+    fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
+        let proc_id = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
+        self.message_sender.send_message(proc_id, message)
+    }
+}
+
 impl ProcessSpawner for SchedulerPoolProcessSpawner {
     fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
         // Get next process ID
@@ -336,6 +400,7 @@ impl ProcessSpawner for SchedulerPoolProcessSpawner {
         // Set the message sender and process spawner for the new process
         proc.message_sender = Some(self.message_sender.clone());
         proc.process_spawner = Some(Arc::new(self.clone()));
+        proc.name_registry = Some(Arc::new(self.clone()));
         
         // Add process to submission queue for schedulers to pick up
         let proc_arc = Arc::new(Mutex::new(proc));
@@ -371,6 +436,7 @@ impl SchedulerPool {
             running_processes: Arc::new(Mutex::new(HashMap::new())),
             shutdown_flag: Arc::new(Mutex::new(false)),
             process_registry: Arc::new(Mutex::new(HashMap::new())),
+            name_registry: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
@@ -394,10 +460,14 @@ impl SchedulerPool {
         // Create message sender
         let message_sender = Arc::new(SchedulerPoolMessageSender {
             process_registry: self.process_registry.clone(),
+            name_registry: self.name_registry.clone(),
         });
         
         // Set the message sender for this process
         proc.message_sender = Some(message_sender.clone());
+        
+        // Set the name registry for this process
+        proc.name_registry = Some(message_sender.clone());
         
         // Set the process spawner for this process
         proc.process_spawner = Some(Arc::new(SchedulerPoolProcessSpawner {
@@ -405,6 +475,7 @@ impl SchedulerPool {
             process_submission_queue: self.process_submission_queue.clone(),
             running_processes: self.running_processes.clone(),
             process_registry: self.process_registry.clone(),
+            name_registry: self.name_registry.clone(),
             message_sender: message_sender,
         }));
         
@@ -514,6 +585,56 @@ impl SchedulerPool {
     pub fn wait_for_completion(self) {
         for handle in self.schedulers {
             handle.join().unwrap();
+        }
+    }
+    
+    // Process name registry methods
+    pub fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
+        let mut registry = self.name_registry.lock().unwrap();
+        
+        if registry.contains_key(&name) {
+            return Err(format!("Name '{}' is already registered", name));
+        }
+        
+        registry.insert(name, proc_id);
+        Ok(())
+    }
+    
+    pub fn unregister_name(&self, name: &str) -> Result<ProcId, String> {
+        let mut registry = self.name_registry.lock().unwrap();
+        
+        match registry.remove(name) {
+            Some(proc_id) => Ok(proc_id),
+            None => Err(format!("Name '{}' is not registered", name)),
+        }
+    }
+    
+    pub fn whereis(&self, name: &str) -> Option<ProcId> {
+        let registry = self.name_registry.lock().unwrap();
+        registry.get(name).copied()
+    }
+    
+    pub fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
+        let proc_id = self.whereis(name).ok_or_else(|| {
+            format!("Process '{}' not found", name)
+        })?;
+        
+        self.send_message(proc_id, message)
+    }
+    
+    // Clean up name registrations when process exits
+    pub fn cleanup_process_names(&self, proc_id: ProcId) {
+        let mut registry = self.name_registry.lock().unwrap();
+        
+        // Remove all names registered to this process
+        let names_to_remove: Vec<String> = registry
+            .iter()
+            .filter(|(_, &pid)| pid == proc_id)
+            .map(|(name, _)| name.clone())
+            .collect();
+        
+        for name in names_to_remove {
+            registry.remove(&name);
         }
     }
 }
@@ -870,6 +991,7 @@ impl TinyProc {
             max_reductions: 1000, // Default reduction limit
             message_sender: None, // Will be set by scheduler
             process_spawner: None, // Will be set by scheduler
+            name_registry: None, // Will be set by scheduler
             waiting_for_message: false,
             monitors: HashMap::new(),
             monitored_by: HashMap::new(),
@@ -1394,6 +1516,53 @@ impl TinyProc {
                 } else {
                     eprintln!("No message sender available for process {}", self.id);
                     self.stack.push(Value::Str("unlink_failed".to_string()));
+                }
+            }
+            OpCode::Register(name) => {
+                // Register current process with a name
+                if let Some(registry) = &self.name_registry {
+                    match registry.register_name(name.clone(), self.id) {
+                        Ok(_) => self.stack.push(Value::Str(format!("registered_{}", name))),
+                        Err(e) => self.stack.push(Value::Str(format!("register_failed_{}", e))),
+                    }
+                } else {
+                    self.stack.push(Value::Str("register_failed_no_registry".to_string()));
+                }
+            }
+            OpCode::Unregister(name) => {
+                // Unregister a name
+                if let Some(registry) = &self.name_registry {
+                    match registry.unregister_name(name) {
+                        Ok(_) => self.stack.push(Value::Str(format!("unregistered_{}", name))),
+                        Err(e) => self.stack.push(Value::Str(format!("unregister_failed_{}", e))),
+                    }
+                } else {
+                    self.stack.push(Value::Str("unregister_failed_no_registry".to_string()));
+                }
+            }
+            OpCode::Whereis(name) => {
+                // Find PID by name (returns 0 if not found)
+                if let Some(registry) = &self.name_registry {
+                    match registry.whereis(name) {
+                        Some(proc_id) => self.stack.push(Value::Int(proc_id as i64)),
+                        None => self.stack.push(Value::Int(0)),
+                    }
+                } else {
+                    self.stack.push(Value::Int(0));
+                }
+            }
+            OpCode::SendNamed(name) => {
+                // Send message to named process
+                let message_value = self.pop_stack("SEND_NAMED")?;
+                
+                if let Some(registry) = &self.name_registry {
+                    let message = Message::Value(message_value);
+                    match registry.send_to_named(name, message) {
+                        Ok(_) => self.stack.push(Value::Str(format!("sent_to_{}", name))),
+                        Err(e) => self.stack.push(Value::Str(format!("send_failed_{}", e))),
+                    }
+                } else {
+                    self.stack.push(Value::Str("send_failed_no_registry".to_string()));
                 }
             }
             _ => {
@@ -2040,6 +2209,11 @@ enum OpCode {
     Demonitor(String), // stop monitoring (using monitor reference)
     Link(ProcId),      // link to a process
     Unlink(ProcId),    // unlink from a process
+    // Process registry operations
+    Register(String),  // register current process with a name
+    Unregister(String), // unregister a name
+    Whereis(String),   // find PID by name (returns 0 if not found)
+    SendNamed(String), // send message to named process
 }
 
 // Garbage Collection Engine Trait
@@ -4224,6 +4398,22 @@ impl VM {
                     // For VM struct, not supported (use TinyProc instead)
                     return Err(VMError::UnsupportedOperation("UNLINK not supported in VM, use TinyProc scheduler".to_string()));
                 }
+                OpCode::Register(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("REGISTER not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Unregister(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("UNREGISTER not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::Whereis(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("WHEREIS not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::SendNamed(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("SENDNAMED not supported in VM, use TinyProc scheduler".to_string()));
+                }
                 OpCode::Halt => {
                     // This should never be reached since HALT is handled in run()
                     unreachable!("HALT instruction should be handled in run() method")
@@ -4826,6 +5016,10 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::Demonitor(monitor_ref) => format!("DEMONITOR {}", monitor_ref),
             OpCode::Link(proc_id) => format!("LINK {}", proc_id),
             OpCode::Unlink(proc_id) => format!("UNLINK {}", proc_id),
+            OpCode::Register(name) => format!("REGISTER {}", name),
+            OpCode::Unregister(name) => format!("UNREGISTER {}", name),
+            OpCode::Whereis(name) => format!("WHEREIS {}", name),
+            OpCode::SendNamed(name) => format!("SENDNAMED {}", name),
         };
         output.push_str(&line);
         output.push('\n');
