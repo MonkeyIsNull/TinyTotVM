@@ -1,0 +1,5 @@
+PUSH_STR "Hello World"
+PRINT
+PUSH_INT 42
+PRINT
+HALT

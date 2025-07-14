@@ -1,0 +1,25 @@
+; Basic concurrency test with YIELD instruction
+; Tests the reduction counter and yielding mechanism
+
+PUSH_STR "=== Basic Concurrency Test ==="
+PRINT
+
+; Simple computation that should yield
+PUSH_INT 1
+PUSH_INT 2
+ADD
+PRINT
+
+; Use YIELD to test manual yielding
+YIELD
+
+PUSH_STR "After yield"
+PRINT
+
+; More computation
+PUSH_INT 10
+PUSH_INT 20
+ADD
+PRINT
+
+HALT
