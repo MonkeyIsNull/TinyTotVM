@@ -46,6 +46,11 @@ pub struct TestResult {
 // Concurrency data structures
 pub type ProcId = u64;
 
+// Trait for sending messages to processes
+pub trait MessageSender: Send + Sync + std::fmt::Debug {
+    fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProcState {
     Ready,
@@ -69,6 +74,7 @@ pub struct TinyProc {
     pub mailbox_sender: Sender<Message>,
     pub reduction_count: usize,
     pub max_reductions: usize,
+    pub message_sender: Option<Arc<dyn MessageSender>>,
     // VM state (isolated per process)
     pub stack: Vec<Value>,
     pub instructions: Vec<OpCode>,
@@ -106,6 +112,12 @@ pub struct SchedulerPool {
     pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
     pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
     pub shutdown_flag: Arc<Mutex<bool>>,
+    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerPoolMessageSender {
+    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
 }
 
 impl Scheduler {
@@ -136,7 +148,7 @@ impl Scheduler {
         None
     }
     
-    pub fn run_scheduler_loop(&mut self, submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>, shutdown_flag: Arc<Mutex<bool>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>) {
+    pub fn run_scheduler_loop(&mut self, submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>, shutdown_flag: Arc<Mutex<bool>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>) {
         while self.running {
             // Check for shutdown
             if let Ok(shutdown) = shutdown_flag.try_lock() {
@@ -147,21 +159,21 @@ impl Scheduler {
             
             // Try to get a process from local queue
             if let Some(proc_arc) = self.get_next_process() {
-                self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone());
+                self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
                 continue;
             }
             
             // Try to get new processes from submission queue
             if let Ok(mut queue) = submission_queue.try_lock() {
                 if let Some(proc_arc) = queue.pop() {
-                    self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone());
+                    self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
                     continue;
                 }
             }
             
             // If no local work, try to steal from other schedulers
             if let Some(proc_arc) = self.steal_from_others() {
-                self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone());
+                self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
                 continue;
             }
             
@@ -207,7 +219,7 @@ impl Scheduler {
         }
     }
     
-    fn execute_process_with_cleanup(&mut self, proc_arc: Arc<Mutex<TinyProc>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>) {
+    fn execute_process_with_cleanup(&mut self, proc_arc: Arc<Mutex<TinyProc>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>) {
         let proc_id = {
             let proc = proc_arc.lock().unwrap();
             proc.id
@@ -225,10 +237,12 @@ impl Scheduler {
                         self.local_queue.push(proc_arc);
                     }
                     Ok(ProcState::Exited) => {
-                        // Process finished, remove from running processes
+                        // Process finished, remove from running processes and registry
                         drop(proc);
                         let mut running = running_processes.lock().unwrap();
                         running.remove(&proc_id);
+                        let mut reg = registry.lock().unwrap();
+                        reg.remove(&proc_id);
                     }
                     Err(e) => {
                         eprintln!("Process {} error: {:?}", proc_id, e);
@@ -236,6 +250,8 @@ impl Scheduler {
                         drop(proc);
                         let mut running = running_processes.lock().unwrap();
                         running.remove(&proc_id);
+                        let mut reg = registry.lock().unwrap();
+                        reg.remove(&proc_id);
                     }
                     _ => {
                         // Other states, re-queue
@@ -245,16 +261,30 @@ impl Scheduler {
                 }
             }
             ProcState::Exited => {
-                // Process is done, remove from running processes
+                // Process is done, remove from running processes and registry
                 drop(proc);
                 let mut running = running_processes.lock().unwrap();
                 running.remove(&proc_id);
+                let mut reg = registry.lock().unwrap();
+                reg.remove(&proc_id);
             }
             _ => {
                 // Re-queue for other states
                 drop(proc);
                 self.local_queue.push(proc_arc);
             }
+        }
+    }
+}
+
+impl MessageSender for SchedulerPoolMessageSender {
+    fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
+        let registry = self.process_registry.lock().unwrap();
+        match registry.get(&target_proc_id) {
+            Some(sender) => {
+                sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
+            }
+            None => Err(format!("Process {} not found", target_proc_id))
         }
     }
 }
@@ -268,6 +298,7 @@ impl SchedulerPool {
             process_submission_queue: Arc::new(Mutex::new(Vec::new())),
             running_processes: Arc::new(Mutex::new(HashMap::new())),
             shutdown_flag: Arc::new(Mutex::new(false)),
+            process_registry: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     
@@ -286,7 +317,12 @@ impl SchedulerPool {
     
     pub fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
         let proc_id = self.get_next_proc_id();
-        let (proc, sender) = TinyProc::new(proc_id, instructions);
+        let (mut proc, sender) = TinyProc::new(proc_id, instructions);
+        
+        // Set the message sender for this process
+        proc.message_sender = Some(Arc::new(SchedulerPoolMessageSender {
+            process_registry: self.process_registry.clone(),
+        }));
         
         // Add process to submission queue for schedulers to pick up
         let proc_arc = Arc::new(Mutex::new(proc));
@@ -297,12 +333,28 @@ impl SchedulerPool {
             running.insert(proc_id, proc_arc.clone());
         }
         
+        // Register process in the registry for message delivery
+        {
+            let mut registry = self.process_registry.lock().unwrap();
+            registry.insert(proc_id, sender.clone());
+        }
+        
         {
             let mut queue = self.process_submission_queue.lock().unwrap();
             queue.push(proc_arc);
         }
         
         (proc_id, sender)
+    }
+    
+    pub fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
+        let registry = self.process_registry.lock().unwrap();
+        match registry.get(&target_proc_id) {
+            Some(sender) => {
+                sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
+            }
+            None => Err(format!("Process {} not found", target_proc_id))
+        }
     }
     
     pub fn spawn_smp_schedulers(&mut self, num_threads: usize) {
@@ -331,6 +383,7 @@ impl SchedulerPool {
             let submission_queue = self.process_submission_queue.clone();
             let shutdown_flag = self.shutdown_flag.clone();
             let running_processes = self.running_processes.clone();
+            let registry = self.process_registry.clone();
             
             let handle = thread::spawn(move || {
                 let mut scheduler = Scheduler {
@@ -340,7 +393,7 @@ impl SchedulerPool {
                     running: true,
                 };
                 
-                scheduler.run_scheduler_loop(submission_queue, shutdown_flag, running_processes);
+                scheduler.run_scheduler_loop(submission_queue, shutdown_flag, running_processes, registry);
             });
             
             self.schedulers.push(handle);
@@ -559,6 +612,46 @@ pub fn test_multithreaded_scheduler() -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+// Message passing test function
+pub fn test_message_passing() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing message passing between processes...");
+    
+    // Create a scheduler pool with 2 threads
+    let mut scheduler_pool = SchedulerPool::new_with_threads(2);
+    
+    // Create process that will send messages
+    let sender_process_instructions = vec![
+        OpCode::PushInt(2), // Target process ID
+        OpCode::PushStr("Hello from Process 1!".to_string()),
+        OpCode::Send(2),    // Send message to process 2
+        OpCode::PushInt(2), // Target process ID
+        OpCode::PushStr("Second message".to_string()),
+        OpCode::Send(2),    // Send another message to process 2
+        OpCode::Halt,
+    ];
+    
+    // Create process that will receive messages
+    let receiver_process_instructions = vec![
+        OpCode::Receive,    // Receive first message
+        OpCode::Print,      // Print received message
+        OpCode::Receive,    // Receive second message
+        OpCode::Print,      // Print received message
+        OpCode::Halt,
+    ];
+    
+    // Spawn processes
+    let (sender_id, _sender1) = scheduler_pool.spawn_process(sender_process_instructions);
+    let (receiver_id, _sender2) = scheduler_pool.spawn_process(receiver_process_instructions);
+    
+    println!("Spawned sender process: {}, receiver process: {}", sender_id, receiver_id);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    println!("Message passing test completed!");
+    Ok(())
+}
+
 impl TinyProc {
     pub fn new(id: ProcId, instructions: Vec<OpCode>) -> (Self, Sender<Message>) {
         let (sender, receiver) = crossbeam::channel::unbounded();
@@ -571,6 +664,7 @@ impl TinyProc {
             mailbox_sender: sender.clone(),
             reduction_count: 0,
             max_reductions: 1000, // Default reduction limit
+            message_sender: None, // Will be set by scheduler
             
             // Initialize VM state
             stack: Vec::new(),
@@ -740,12 +834,38 @@ impl TinyProc {
                 self.state = ProcState::Waiting;
                 return Ok(());
             }
-            OpCode::Send(proc_id) => {
-                // For now, just pop the message and continue
-                // TODO: Implement proper message sending
-                let _message = self.pop_stack("SEND")?;
-                // In a real implementation, we'd need access to the scheduler
-                // to send the message to the target process
+            OpCode::Send(_proc_id) => {
+                // Get the message and target process ID from the stack
+                let message_value = self.pop_stack("SEND")?;
+                let target_proc_id = self.pop_stack("SEND")?;
+                
+                // Convert target process ID to ProcId
+                let target_id = match target_proc_id {
+                    Value::Int(id) => id as ProcId,
+                    _ => return Err(VMError::TypeMismatch {
+                        expected: "int (process ID)".to_string(),
+                        got: format!("{:?}", target_proc_id),
+                        operation: "SEND".to_string(),
+                    }),
+                };
+                
+                // Convert Value to Message
+                let message = Message::Value(message_value);
+                
+                // Send message using the message sender
+                if let Some(sender) = &self.message_sender {
+                    match sender.send_message(target_id, message) {
+                        Ok(_) => {
+                            // Message sent successfully
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send message to process {}: {}", target_id, e);
+                            // In a real implementation, we might want to handle this error differently
+                        }
+                    }
+                } else {
+                    eprintln!("No message sender available for process {}", self.id);
+                }
             }
             _ => {
                 // For now, just advance IP for unsupported instructions
@@ -4421,6 +4541,7 @@ fn main() {
         eprintln!("       ttvm test-all                                    # Run all examples and tests");
         eprintln!("       ttvm test-concurrency                           # Run concurrency tests");
         eprintln!("       ttvm test-multithreaded                         # Run multi-threaded scheduler tests");
+        eprintln!("       ttvm test-message-passing                       # Run message passing tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
@@ -4564,6 +4685,16 @@ fn main() {
                     Ok(_) => println!("All multi-threaded scheduler tests passed!"),
                     Err(e) => {
                         eprintln!("Multi-threaded scheduler tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return;
+            }
+            "test-message-passing" => {
+                match test_message_passing() {
+                    Ok(_) => println!("All message passing tests passed!"),
+                    Err(e) => {
+                        eprintln!("Message passing tests failed: {}", e);
                         std::process::exit(1);
                     }
                 }
