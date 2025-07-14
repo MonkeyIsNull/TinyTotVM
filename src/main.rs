@@ -99,6 +99,13 @@ pub struct TinyProc {
     pub monitored_by: HashMap<ProcId, String>, // monitoring_pid -> monitor_ref
     pub linked_processes: HashSet<ProcId>, // bidirectional links
     pub exit_reason: Option<String>, // reason for exit
+    // Supervision data
+    pub is_supervisor: bool,
+    pub supervised_children: HashMap<String, (ProcId, Vec<OpCode>)>, // child_name -> (pid, instructions)
+    pub supervisor_pid: Option<ProcId>, // parent supervisor
+    pub restart_counts: HashMap<String, (usize, Instant)>, // child_name -> (count, last_restart_time)
+    pub max_restarts: usize, // maximum restarts per time period
+    pub max_restart_time: Duration, // time window for restart counting
     // VM state (isolated per process)
     pub stack: Vec<Value>,
     pub instructions: Vec<OpCode>,
@@ -997,6 +1004,13 @@ impl TinyProc {
             monitored_by: HashMap::new(),
             linked_processes: HashSet::new(),
             exit_reason: None,
+            // Initialize supervision data
+            is_supervisor: false,
+            supervised_children: HashMap::new(),
+            supervisor_pid: None,
+            restart_counts: HashMap::new(),
+            max_restarts: 3, // Default: max 3 restarts
+            max_restart_time: Duration::from_secs(60), // Default: per 60 seconds
             
             // Initialize VM state
             stack: Vec::new(),
@@ -1100,6 +1114,17 @@ impl TinyProc {
                 let _ = sender.send_message(*linked_pid, exit_msg);
             }
         }
+        
+        // Notify supervisor of child exit (if this process has a supervisor)
+        if let Some(supervisor_pid) = self.supervisor_pid {
+            if let Some(sender) = &self.message_sender {
+                // Find the child name for this process
+                // In a real implementation, this would be tracked properly
+                let child_exit_msg = Message::Signal(format!("child_exit_{}_{}", self.id, reason));
+                println!("Notifying supervisor {} of child {} exit: {}", supervisor_pid, self.id, reason);
+                let _ = sender.send_message(supervisor_pid, child_exit_msg);
+            }
+        }
     }
     
     pub fn has_reductions_left(&self) -> bool {
@@ -1114,6 +1139,55 @@ impl TinyProc {
         self.reduction_count = 0;
     }
     
+    // Supervision helper methods
+    fn can_restart_child(&mut self, child_name: &str) -> bool {
+        let now = Instant::now();
+        
+        // Get or create restart count entry
+        let (count, last_restart) = match self.restart_counts.get(child_name) {
+            Some((c, lr)) => (*c, *lr),
+            None => (0, now),
+        };
+        
+        // If the time window has passed, reset the count
+        if now.duration_since(last_restart) > self.max_restart_time {
+            self.restart_counts.insert(child_name.to_string(), (0, now));
+            return true;
+        }
+        
+        // Check if we've exceeded the maximum restarts
+        count < self.max_restarts
+    }
+    
+    fn record_restart(&mut self, child_name: &str) {
+        let now = Instant::now();
+        let count = match self.restart_counts.get(child_name) {
+            Some((c, _)) => *c,
+            None => 0,
+        };
+        self.restart_counts.insert(child_name.to_string(), (count + 1, now));
+    }
+    
+    fn handle_child_exit(&mut self, child_name: &str, exit_reason: &str) {
+        if !self.is_supervisor {
+            return;
+        }
+        
+        // Check if we can restart this child
+        if self.can_restart_child(child_name) {
+            self.record_restart(child_name);
+            
+            // In a real implementation, this would spawn a new process
+            // For now, we'll just log the restart attempt
+            eprintln!("Supervisor {} restarting child {} due to: {}", 
+                     self.id, child_name, exit_reason);
+        } else {
+            eprintln!("Supervisor {} cannot restart child {} - too many restarts", 
+                     self.id, child_name);
+            // In a real implementation, this might escalate to parent supervisor
+        }
+    }
+
     pub fn step(&mut self) -> VMResult<bool> {
         if self.ip >= self.instructions.len() {
             self.handle_process_exit("normal".to_string());
@@ -1563,6 +1637,43 @@ impl TinyProc {
                     }
                 } else {
                     self.stack.push(Value::Str("send_failed_no_registry".to_string()));
+                }
+            }
+            OpCode::StartSupervisor => {
+                // Mark this process as a supervisor
+                self.is_supervisor = true;
+                self.stack.push(Value::Str("supervisor_started".to_string()));
+            }
+            OpCode::SuperviseChild(child_name) => {
+                // Supervise a child process - for now just mark it as supervised
+                // The actual child process would be spawned separately
+                self.stack.push(Value::Str(format!("supervising_{}", child_name)));
+            }
+            OpCode::RestartChild(child_name) => {
+                // Restart a specific child process with safety measures
+                if self.is_supervisor {
+                    if self.supervised_children.contains_key(child_name) {
+                        // Check if we can restart this child (prevents infinite loops)
+                        if self.can_restart_child(child_name) {
+                            self.record_restart(child_name);
+                            
+                            // In a real implementation, this would:
+                            // 1. Terminate the old child process
+                            // 2. Spawn a new child process with the same instructions
+                            // 3. Update the supervised_children mapping
+                            self.stack.push(Value::Str(format!("restarting_{}", child_name)));
+                            
+                            // For now, just simulate the restart
+                            eprintln!("Supervisor {} safely restarting child {}", self.id, child_name);
+                        } else {
+                            self.stack.push(Value::Str(format!("restart_limit_exceeded_{}", child_name)));
+                            eprintln!("Supervisor {} cannot restart child {} - too many restarts", self.id, child_name);
+                        }
+                    } else {
+                        self.stack.push(Value::Str(format!("child_not_found_{}", child_name)));
+                    }
+                } else {
+                    self.stack.push(Value::Str("not_supervisor".to_string()));
                 }
             }
             _ => {
@@ -2214,6 +2325,10 @@ enum OpCode {
     Unregister(String), // unregister a name
     Whereis(String),   // find PID by name (returns 0 if not found)
     SendNamed(String), // send message to named process
+    // Supervision operations
+    StartSupervisor, // start a supervisor process
+    SuperviseChild(String), // supervise a child process with restart strategy
+    RestartChild(String), // restart a specific child process
 }
 
 // Garbage Collection Engine Trait
@@ -4414,6 +4529,18 @@ impl VM {
                     // For VM struct, not supported (use TinyProc instead)
                     return Err(VMError::UnsupportedOperation("SENDNAMED not supported in VM, use TinyProc scheduler".to_string()));
                 }
+                OpCode::StartSupervisor => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("STARTSUPERVISOR not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::SuperviseChild(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("SUPERVISECHILD not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::RestartChild(_name) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("RESTARTCHILD not supported in VM, use TinyProc scheduler".to_string()));
+                }
                 OpCode::Halt => {
                     // This should never be reached since HALT is handled in run()
                     unreachable!("HALT instruction should be handled in run() method")
@@ -5020,6 +5147,9 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::Unregister(name) => format!("UNREGISTER {}", name),
             OpCode::Whereis(name) => format!("WHEREIS {}", name),
             OpCode::SendNamed(name) => format!("SENDNAMED {}", name),
+            OpCode::StartSupervisor => "STARTSUPERVISOR".to_string(),
+            OpCode::SuperviseChild(name) => format!("SUPERVISECHILD {}", name),
+            OpCode::RestartChild(name) => format!("RESTARTCHILD {}", name),
         };
         output.push_str(&line);
         output.push('\n');

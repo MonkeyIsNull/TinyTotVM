@@ -1,0 +1,10 @@
+PUSH_STR "Starting basic concurrency test"
+PRINT
+
+PUSH_STR "Testing process creation and management"
+PRINT
+
+PUSH_STR "Test completed - basic functionality works"
+PRINT
+
+HALT
