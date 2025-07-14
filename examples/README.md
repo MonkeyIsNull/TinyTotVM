@@ -151,7 +151,7 @@ Establish conventions for message formats, such as:
 
 **Run with**:
 ```bash
-ttvm examples/01_process_spawning.ttvm
+ttvm --smp examples/01_process_spawning.ttvm
 ```
 
 ### 02_message_passing.ttvm
@@ -163,7 +163,7 @@ ttvm examples/01_process_spawning.ttvm
 
 **Run with**:
 ```bash
-ttvm examples/02_message_passing.ttvm
+ttvm --smp examples/02_message_passing.ttvm
 ```
 
 ### 03_name_registry.ttvm
@@ -175,7 +175,7 @@ ttvm examples/02_message_passing.ttvm
 
 **Run with**:
 ```bash
-ttvm examples/03_name_registry.ttvm
+ttvm --smp examples/03_name_registry.ttvm
 ```
 
 ### 04_comprehensive_workflow.ttvm
@@ -188,7 +188,7 @@ ttvm examples/03_name_registry.ttvm
 
 **Run with**:
 ```bash
-ttvm examples/04_comprehensive_workflow.ttvm
+ttvm --smp examples/04_comprehensive_workflow.ttvm
 ```
 
 ## Best Practices
@@ -235,17 +235,17 @@ ttvm examples/04_comprehensive_workflow.ttvm
 To run the examples with the TinyTotVM scheduler:
 
 ```bash
-# Basic execution
-ttvm examples/01_process_spawning.ttvm
+# With SMP scheduler (required for concurrency examples)
+ttvm --smp examples/01_process_spawning.ttvm
 
-# With SMP scheduler (recommended for concurrency examples)
+# With SMP scheduler 
 ttvm --smp examples/02_message_passing.ttvm
 
-# With debugging output
-ttvm --debug examples/03_name_registry.ttvm
+# With debugging output (concurrency requires --smp)
+ttvm --smp --debug examples/03_name_registry.ttvm
 
-# With process tracing
-ttvm --trace-procs examples/04_comprehensive_workflow.ttvm
+# With process tracing (concurrency requires --smp)
+ttvm --smp --trace-procs examples/04_comprehensive_workflow.ttvm
 ```
 
 ## Advanced Topics
