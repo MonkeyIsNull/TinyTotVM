@@ -131,7 +131,7 @@ The `examples/` directory contains 67 comprehensive test programs demonstrating 
 - **`exception_test.ttvm`** - Exception handling examples
 - **`stdlib_comprehensive_test.ttvm`** - Complete standard library showcase
 - **`complete_optimization_showcase.ttvm`** - All 8 optimization passes
-- **`concurrency_test.ttvm`** - BEAM-style concurrency with YIELD instruction
+- **`concurrency_test.ttvm`** - Very Experimental BEAM-style concurrency with YIELD instruction
 
 ## Command Line Options
 
