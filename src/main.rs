@@ -407,7 +407,7 @@ impl Scheduler {
             // Try to get new processes from submission queue FIRST (higher priority)
             if let Ok(mut queue) = submission_queue.try_lock() {
                 if let Some(proc_arc) = queue.pop() {
-                    let proc_id = {
+                    let _proc_id = {
                         let proc = proc_arc.lock().unwrap();
                         proc.id
                     };
@@ -800,7 +800,7 @@ impl SchedulerPool {
     }
     
     pub fn wait_for_completion(self) {
-        for (i, handle) in self.schedulers.into_iter().enumerate() {
+        for (_i, handle) in self.schedulers.into_iter().enumerate() {
             // Use a timeout approach - if threads don't join within reasonable time, force exit
             let start_time = std::time::Instant::now();
             let mut handle_option = Some(handle);
