@@ -2294,6 +2294,56 @@ impl TinyProc {
                     }),
                 }
             }
+            OpCode::Mul => {
+                let b = self.pop_stack("MUL")?;
+                let a = self.pop_stack("MUL")?;
+                match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x * y)),
+                    (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 * y)),
+                    (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x * *y as f64)),
+                    (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x * y)),
+                    _ => return Err(VMError::TypeMismatch { 
+                        expected: "two numbers (int or float)".to_string(), 
+                        got: format!("{:?}, {:?}", a, b), 
+                        operation: "MUL".to_string() 
+                    }),
+                }
+            }
+            OpCode::Div => {
+                let b = self.pop_stack("DIV")?;
+                let a = self.pop_stack("DIV")?;
+                match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => {
+                        if *y == 0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Int(x / y));
+                    },
+                    (Value::Int(x), Value::Float(y)) => {
+                        if *y == 0.0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Float(*x as f64 / y));
+                    },
+                    (Value::Float(x), Value::Int(y)) => {
+                        if *y == 0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Float(x / *y as f64));
+                    },
+                    (Value::Float(x), Value::Float(y)) => {
+                        if *y == 0.0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Float(x / y));
+                    },
+                    _ => return Err(VMError::TypeMismatch { 
+                        expected: "two numbers (int or float)".to_string(), 
+                        got: format!("{:?}, {:?}", a, b), 
+                        operation: "DIV".to_string() 
+                    }),
+                }
+            }
             OpCode::Halt => {
                 self.handle_process_exit("normal".to_string());
                 // Don't advance IP for Halt - process is done
@@ -3148,6 +3198,7 @@ pub enum VMError {
     UnsupportedOperation(String),
     RuntimeError(String),
     TypeError(String),
+    DivisionByZero,
 }
 
 impl fmt::Display for VMError {
@@ -3171,6 +3222,7 @@ impl fmt::Display for VMError {
             VMError::UnsupportedOperation(op) => write!(f, "Unsupported operation: {}", op),
             VMError::RuntimeError(msg) => write!(f, "Runtime error: {}", msg),
             VMError::TypeError(msg) => write!(f, "Type error: {}", msg),
+            VMError::DivisionByZero => write!(f, "Division by zero"),
         }
     }
 }
@@ -3281,7 +3333,9 @@ pub enum OpCode {
     AddF,
     Sub,
     SubF,
+    Mul,
     MulF,
+    Div,
     DivF,
     Concat,
     Print,
@@ -4062,6 +4116,56 @@ impl VM {
                             expected: "two numbers (int or float)".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
                             operation: "SUB".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Mul => {
+                    let b = self.pop_stack("MUL")?;
+                    let a = self.pop_stack("MUL")?;
+                    match (&a, &b) {
+                        (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x * y)),
+                        (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 * y)),
+                        (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x * *y as f64)),
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x * y)),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two numbers (int or float)".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "MUL".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Div => {
+                    let b = self.pop_stack("DIV")?;
+                    let a = self.pop_stack("DIV")?;
+                    match (&a, &b) {
+                        (Value::Int(x), Value::Int(y)) => {
+                            if *y == 0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Int(x / y));
+                        },
+                        (Value::Int(x), Value::Float(y)) => {
+                            if *y == 0.0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Float(*x as f64 / y));
+                        },
+                        (Value::Float(x), Value::Int(y)) => {
+                            if *y == 0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Float(x / *y as f64));
+                        },
+                        (Value::Float(x), Value::Float(y)) => {
+                            if *y == 0.0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Float(x / y));
+                        },
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two numbers (int or float)".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "DIV".to_string() 
                         }),
                     }
                 }
@@ -5843,7 +5947,9 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
             "ADD_F" => OpCode::AddF,
             "SUB" => OpCode::Sub,
             "SUB_F" => OpCode::SubF,
+            "MUL" => OpCode::Mul,
             "MUL_F" => OpCode::MulF,
+            "DIV" => OpCode::Div,
             "DIV_F" => OpCode::DivF,
             "DUP" => OpCode::Dup,
             "CONCAT" => OpCode::Concat,
@@ -6190,7 +6296,9 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::AddF => "ADD_F".to_string(),
             OpCode::Sub => "SUB".to_string(),
             OpCode::SubF => "SUB_F".to_string(),
+            OpCode::Mul => "MUL".to_string(),
             OpCode::MulF => "MUL_F".to_string(),
+            OpCode::Div => "DIV".to_string(),
             OpCode::DivF => "DIV_F".to_string(),
             OpCode::Concat => "CONCAT".to_string(),
             OpCode::Print => "PRINT".to_string(),
@@ -6321,6 +6429,22 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
     std::fs::write(output_file, output)
 }
 
+fn run_smp_test(program: Vec<OpCode>) -> Result<(), Box<dyn std::error::Error>> {
+    // Create SMP scheduler pool with reduced verbosity for testing
+    let mut scheduler_pool = SchedulerPool::new_with_default_threads();
+    
+    // Spawn the main process with the program
+    let (_main_proc_id, _main_sender) = scheduler_pool.spawn_process(program);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    // Wait for schedulers to finish
+    scheduler_pool.wait_for_completion();
+    
+    Ok(())
+}
+
 fn run_comprehensive_tests() {
     use std::path::Path;
     use std::io::Write;
@@ -6328,95 +6452,43 @@ fn run_comprehensive_tests() {
     println!("=== TinyTotVM Comprehensive Test Suite ===");
     println!();
     
-    // List of test files to run
-    let test_files = vec![
-        // Core functionality tests
-        ("showcase.ttvm", "Basic VM showcase"),
-        ("float_test.ttvm", "Float operations"),
-        ("object_test.ttvm", "Object manipulation"),
-        ("list_test.ttvm", "List operations"),
-        ("string_utils.ttvm", "String utilities"),
-        ("variables.ttvm", "Variable operations"),
-        ("null_test.ttvm", "Null handling"),
-        ("bool_test.ttvm", "Boolean operations"),
-        ("coercion_test.ttvm", "Type coercion"),
-        ("comparison.ttvm", "Comparison operations"),
-        ("comparison-le.ttvm", "Less-than-equal comparison"),
-        
-        // Function and closure tests
-        ("function_test.ttvm", "Basic functions"),
-        ("function_args_test.ttvm", "Function arguments"),
-        ("function_pointer_test.ttvm", "Function pointers"),
-        ("higher_order_test.ttvm", "Higher-order functions"),
-        ("call_test.ttvm", "Function calls"),
-        ("scoped_call.ttvm", "Scoped function calls"),
-        ("closure_test.ttvm", "Closures"),
-        ("simple_closure_test.ttvm", "Simple closures"),
-        ("nested_closure_test.ttvm", "Nested closures"),
-        ("lambda_test.ttvm", "Lambda functions"),
-        
-        // Module system tests
-        ("module_test.ttvm", "Basic modules"),
-        ("comprehensive_module_test.ttvm", "Advanced modules"),
-        ("closure_module_test.ttvm", "Module closures"),
-        ("complex_closure_test.ttvm", "Complex closures"),
-        
-        // Exception handling tests
-        ("exception_test.ttvm", "Exception handling"),
-        ("function_exception_test.ttvm", "Function exceptions"),
-        ("nested_exception_test.ttvm", "Nested exceptions"),
-        ("vm_error_exception_test.ttvm", "VM error exceptions"),
-        
-        // Standard library tests
-        ("stdlib_test.ttvm", "Standard library - math"),
-        ("stdlib_string_test.ttvm", "Standard library - strings"),
-        ("stdlib_prelude_test.ttvm", "Standard library - prelude"),
-        ("stdlib_comprehensive_test.ttvm", "Standard library - comprehensive"),
-        ("stdlib_enhanced_io_test.ttvm", "Standard library - enhanced I/O"),
-        ("stdlib_network_test.ttvm", "Standard library - network"),
-        ("stdlib_advanced_test.ttvm", "Standard library - advanced"),
-        
-        // I/O tests
-        ("io_simple_test.ttvm", "Simple I/O"),
-        ("io_comprehensive_test.ttvm", "Comprehensive I/O"),
-        ("advanced_io_test.ttvm", "Advanced I/O"),
-        
-        // Network tests
-        ("network_simple_test.ttvm", "Simple network"),
-        ("network_tcp_test.ttvm", "TCP operations"),
-        ("network_udp_test.ttvm", "UDP operations"),
-        ("network_comprehensive_test.ttvm", "Comprehensive network"),
-        
-        // Optimization tests
-        ("optimization_test.ttvm", "Basic optimization"),
-        ("constant_folding_test.ttvm", "Constant folding"),
-        ("dead_code_test.ttvm", "Dead code elimination"),
-        ("tail_call_test.ttvm", "Tail call optimization"),
-        ("memory_optimization_test.ttvm", "Memory optimization"),
-        ("advanced_optimization_test.ttvm", "Advanced optimization"),
-        ("safe_advanced_optimization_test.ttvm", "Safe advanced optimization"),
-        ("comprehensive_optimization_test.ttvm", "Comprehensive optimization"),
-        ("complete_optimization_showcase.ttvm", "Complete optimization showcase"),
-        
-        // Control flow tests
-        ("if_else.ttvm", "If-else statements"),
-        ("countdown.ttvm", "Countdown loop"),
-        ("countdown_label.ttvm", "Countdown with labels"),
-        ("delete.ttvm", "Delete operations"),
-        ("nested_object_test.ttvm", "Nested objects"),
-        
-        // Additional files
-        ("circular_a.ttvm", "Circular dependency A"),
-        ("circular_b.ttvm", "Circular dependency B"),
-        ("closure_module.ttvm", "Closure module"),
-        ("complex_closure_module.ttvm", "Complex closure module"),
-        ("io_interactive_test.ttvm", "Interactive I/O test"),
-        ("io_test.ttvm", "Basic I/O test"),
-        ("math_module.ttvm", "Math module"),
-        ("program.ttvm", "Basic program"),
-        ("showcase_lisp.ttvm", "Lisp showcase"),
-        ("simple_profiling_test.ttvm", "Simple profiling test"),
-    ];
+    // Automatically discover all .ttvm files in the examples directory
+    let examples_dir = Path::new("examples");
+    let mut test_files = Vec::new();
+    
+    if examples_dir.exists() && examples_dir.is_dir() {
+        match fs::read_dir(examples_dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if let Some(extension) = path.extension() {
+                            if extension == "ttvm" {
+                                if let Some(filename) = path.file_name() {
+                                    if let Some(filename_str) = filename.to_str() {
+                                        test_files.push(filename_str.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading examples directory: {}", e);
+                return;
+            }
+        }
+    } else {
+        eprintln!("Examples directory not found!");
+        return;
+    }
+    
+    // Sort test files for consistent ordering
+    test_files.sort();
+    
+    println!("Found {} test files in examples directory", test_files.len());
+    println!();
     
     let mut passed = 0;
     let mut failed = 0;
@@ -6430,14 +6502,43 @@ fn run_comprehensive_tests() {
         ("circular_b.ttvm", "Circular dependency detected"),
     ]);
     
-    for (filename, description) in &test_files {
+    // Files that require concurrency features (should be run with SMP)
+    let concurrency_files = std::collections::HashSet::from([
+        "01_process_spawning.ttvm",
+        "02_message_passing.ttvm", 
+        "03_name_registry.ttvm",
+        "04_comprehensive_workflow.ttvm",
+        "05_trap_exit_test.ttvm",
+        "06_supervisor_test.ttvm",
+        "07_process_linking_test.ttvm",
+        "08_selective_receive_test.ttvm",
+        "09_process_registry_test.ttvm",
+        "10_comprehensive_concurrency_test.ttvm",
+        "coffee_shop_demo.ttvm",
+        "concurrency_test.ttvm",
+        "simple_concurrency_demo.ttvm",
+        "simple_registry_test.ttvm",
+        "simple_trap_exit_test.ttvm",
+        "spawn_simple_worker.ttvm",
+        "spawn_test.ttvm",
+        "test_spawn.ttvm",
+        "test_sendnamed.ttvm",
+        "test_examples.ttvm",
+        "working_beam_example.ttvm",
+        "working_example.ttvm",
+        "barista_worker.ttvm",
+        "cashier_worker.ttvm",
+        "simple_worker_test.ttvm",
+    ]);
+    
+    for filename in &test_files {
         let path = format!("examples/{}", filename);
         
         if !Path::new(&path).exists() {
-            println!("SKIP: {} (file not found)", description);
+            println!("SKIP: {} (file not found)", filename);
             skipped += 1;
             results.push(TestResult {
-                name: description.to_string(),
+                name: filename.to_string(),
                 expected: "File exists".to_string(),
                 actual: "File not found".to_string(),
                 passed: false,
@@ -6445,21 +6546,33 @@ fn run_comprehensive_tests() {
             continue;
         }
         
-        print!("Testing {}: ", description);
+        // Determine if this test should use SMP scheduler
+        let use_smp = concurrency_files.contains(filename.as_str());
+        let test_mode = if use_smp { "SMP" } else { "Regular" };
+        
+        print!("Testing {} ({}): ", filename, test_mode);
         Write::flush(&mut std::io::stdout()).unwrap();
         
         // Parse and run the test
         match parse_program(&path) {
             Ok(program) => {
-                let mut vm = VM::new(program);
-                match vm.run() {
+                let test_result = if use_smp {
+                    // Run with SMP scheduler
+                    run_smp_test(program)
+                } else {
+                    // Run with regular VM
+                    let mut vm = VM::new(program);
+                    vm.run().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                };
+                
+                match test_result {
                     Ok(()) => {
                         // Check if this test was expected to fail
-                        if let Some(expected_error) = expected_failures.get(filename) {
+                        if let Some(expected_error) = expected_failures.get(filename.as_str()) {
                             println!("FAIL: Expected error '{}' but test passed", expected_error);
                             failed += 1;
                             results.push(TestResult {
-                                name: description.to_string(),
+                                name: format!("{} ({})", filename, test_mode),
                                 expected: format!("Error: {}", expected_error),
                                 actual: "Success".to_string(),
                                 passed: false,
@@ -6468,7 +6581,7 @@ fn run_comprehensive_tests() {
                             println!("PASS");
                             passed += 1;
                             results.push(TestResult {
-                                name: description.to_string(),
+                                name: format!("{} ({})", filename, test_mode),
                                 expected: "Success".to_string(),
                                 actual: "Success".to_string(),
                                 passed: true,
@@ -6478,12 +6591,12 @@ fn run_comprehensive_tests() {
                     Err(e) => {
                         let error_msg = e.to_string();
                         // Check if this is an expected failure
-                        if let Some(expected_error) = expected_failures.get(filename) {
+                        if let Some(expected_error) = expected_failures.get(filename.as_str()) {
                             if error_msg.contains(expected_error) {
                                 println!("PASS (Expected failure)");
                                 passed += 1;
                                 results.push(TestResult {
-                                    name: description.to_string(),
+                                    name: format!("{} ({})", filename, test_mode),
                                     expected: format!("Error: {}", expected_error),
                                     actual: format!("Error: {}", error_msg),
                                     passed: true,
@@ -6492,7 +6605,7 @@ fn run_comprehensive_tests() {
                                 println!("FAIL: Expected '{}' but got '{}'", expected_error, error_msg);
                                 failed += 1;
                                 results.push(TestResult {
-                                    name: description.to_string(),
+                                    name: format!("{} ({})", filename, test_mode),
                                     expected: format!("Error: {}", expected_error),
                                     actual: format!("Error: {}", error_msg),
                                     passed: false,
@@ -6502,7 +6615,7 @@ fn run_comprehensive_tests() {
                             println!("FAIL: {}", e);
                             failed += 1;
                             results.push(TestResult {
-                                name: description.to_string(),
+                                name: format!("{} ({})", filename, test_mode),
                                 expected: "Success".to_string(),
                                 actual: format!("Error: {}", e),
                                 passed: false,
@@ -6515,7 +6628,7 @@ fn run_comprehensive_tests() {
                 println!("FAIL: Parse error: {}", e);
                 failed += 1;
                 results.push(TestResult {
-                    name: description.to_string(),
+                    name: filename.to_string(),
                     expected: "Success".to_string(),
                     actual: format!("Parse error: {}", e),
                     passed: false,
