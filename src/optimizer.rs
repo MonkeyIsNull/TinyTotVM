@@ -1,4 +1,4 @@
-use crate::OpCode;
+use crate::vm::OpCode;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]

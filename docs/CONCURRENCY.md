@@ -1,6 +1,6 @@
 # BEAM-Style Concurrency in TinyTotVM
 
-TinyTotVM implements BEAM-style (Erlang/Elixir-inspired) actor model concurrency with lightweight processes, message passing, and fault tolerance.
+TinyTotVM implements BEAM-style (Erlang/Elixir-inspired) actor model concurrency with lightweight processes, message passing, and fault tolerance. The concurrency system is implemented as a modular architecture in `src/concurrency/` for maintainability and extensibility.
 
 ## Quick Start
 

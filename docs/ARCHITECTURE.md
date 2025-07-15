@@ -1,6 +1,54 @@
 # Architecture Documentation
 
-TinyTotVM uses a clean, modular architecture designed for extensibility, performance, and educational clarity.
+TinyTotVM uses a clean, modular architecture designed for extensibility, performance, and educational clarity. The codebase is organized into logical modules that separate concerns and enable easy maintenance and extension.
+
+## Modular Architecture Overview
+
+TinyTotVM has been refactored from a monolithic 7,000+ line `main.rs` file into a well-organized, modular structure:
+
+```
+src/
+├── main.rs                    # Entry point and CLI
+├── lib.rs                     # Library interface
+├── bytecode.rs                # Unified instruction parsing
+├── compiler.rs                # Source compilation
+├── lisp_compiler.rs           # Lisp transpilation
+├── optimizer.rs               # Optimization passes
+├── vm/                        # Virtual machine core
+│   ├── machine.rs             # Execution engine
+│   ├── value.rs               # Type system
+│   ├── opcode.rs              # Instruction definitions
+│   ├── stack.rs               # Stack management
+│   ├── memory.rs              # Memory management
+│   └── errors.rs              # Error handling
+├── concurrency/               # BEAM-style concurrency
+│   ├── pool.rs                # SMP scheduler
+│   ├── process.rs             # Process isolation
+│   ├── scheduler.rs           # Individual schedulers
+│   ├── registry.rs            # Process registry
+│   ├── supervisor.rs          # Supervision trees
+│   └── messages.rs            # Message types
+├── gc/                        # Garbage collection
+│   ├── mark_sweep.rs          # Mark-sweep GC
+│   ├── no_gc.rs               # No-op GC
+│   └── stats.rs               # GC statistics
+├── profiling/                 # Performance analysis
+│   ├── profiler.rs            # Profiling engine
+│   └── stats.rs               # Statistics
+├── testing/                   # Test framework
+│   ├── harness.rs             # Test execution
+│   └── runner.rs              # Test runner
+└── cli/                       # Command line interface
+    ├── args.rs                # Argument parsing
+    └── commands.rs            # Command dispatch
+```
+
+**Benefits of Modular Architecture:**
+- **Maintainability** - Clear separation of concerns
+- **Testability** - Individual modules can be tested in isolation
+- **Extensibility** - Easy to add new features without affecting existing code
+- **Performance** - Optimized compilation and reduced compile times
+- **Collaboration** - Multiple developers can work on different modules
 
 ## High-Level Architecture
 
@@ -25,16 +73,118 @@ TinyTotVM uses a clean, modular architecture designed for extensibility, perform
 
 ## Core Components
 
-### VM Engine (main.rs)
-The heart of TinyTotVM, implementing:
+### Virtual Machine Core (`src/vm/`)
+The heart of TinyTotVM, organized into specialized modules:
 
+#### VM Engine (`src/vm/machine.rs`)
 - **Stack-based execution model**
-- **Instruction dispatch loop**
-- **Memory management**
+- **Instruction dispatch loop**  
+- **Module loading and circular dependency detection**
 - **Function call handling**
 - **Exception processing**
 - **Garbage collection integration**
 - **Profiling and tracing support**
+
+#### Value System (`src/vm/value.rs`)
+- **Dynamic type system**
+- **Type coercion and conversion**
+- **Value serialization/deserialization**
+
+#### Memory Management (`src/vm/memory.rs`)
+- **Stack operations and bounds checking**
+- **Variable scoping and frame management**
+- **Call stack management**
+
+#### Error Handling (`src/vm/errors.rs`)
+- **Comprehensive error types**
+- **Stack unwinding and cleanup**
+- **Error reporting and context**
+
+#### Instruction Set (`src/vm/opcode.rs`)
+- **OpCode definitions**
+- **Message patterns for concurrency**
+- **Instruction parameter handling**
+
+### Concurrency System (`src/concurrency/`)
+BEAM-style actor model with complete fault tolerance:
+
+#### Scheduler Pool (`src/concurrency/pool.rs`)
+- **SMP work-stealing scheduler**
+- **Multi-core process distribution**
+- **Load balancing and fairness**
+
+#### Process Isolation (`src/concurrency/process.rs`)
+- **Isolated process state**
+- **Message passing and mailboxes**
+- **Process monitoring and linking**
+- **Supervision tree integration**
+
+#### Process Registry (`src/concurrency/registry.rs`)
+- **Named process registration**
+- **Process lifecycle management**
+- **Name resolution and cleanup**
+
+#### Supervision System (`src/concurrency/supervisor.rs`)
+- **Fault tolerance strategies**
+- **Automatic process restart**
+- **Supervision tree management**
+
+### Garbage Collection (`src/gc/`)
+Pluggable garbage collection architecture:
+
+#### Mark-Sweep GC (`src/gc/mark_sweep.rs`)
+- **Traditional mark-and-sweep algorithm**
+- **Root set identification**
+- **Memory compaction**
+
+#### No-Op GC (`src/gc/no_gc.rs`)
+- **Disabled garbage collection**
+- **Testing and benchmarking**
+
+#### GC Statistics (`src/gc/stats.rs`)
+- **Performance metrics**
+- **Memory usage tracking**
+- **Collection frequency analysis**
+
+### Profiling and Debugging (`src/profiling/`)
+Comprehensive performance analysis:
+
+#### Profiler (`src/profiling/profiler.rs`)
+- **Function-level timing**
+- **Instruction counting**
+- **Call frequency analysis**
+- **Memory allocation tracking**
+
+#### Statistics (`src/profiling/stats.rs`)
+- **Performance reporting**
+- **Color-coded output**
+- **Trend analysis**
+
+### Testing Framework (`src/testing/`)
+Comprehensive test execution and reporting:
+
+#### Test Harness (`src/testing/harness.rs`)
+- **Test discovery and execution**
+- **Result collection and aggregation**
+- **Progress reporting**
+
+#### Test Runner (`src/testing/runner.rs`)
+- **Individual test execution**
+- **Error handling and reporting**
+- **Test isolation**
+
+### Command Line Interface (`src/cli/`)
+User-friendly command line interface:
+
+#### Argument Parsing (`src/cli/args.rs`)
+- **Command line option parsing**
+- **Configuration validation**
+- **Help and usage information**
+
+#### Command Dispatch (`src/cli/commands.rs`)
+- **Command routing and execution**
+- **Error handling and reporting**
+- **User feedback**
 
 ### Value System
 ```rust
@@ -109,7 +259,7 @@ trait GcEngine {
 
 ## Compilation Pipeline
 
-### 1. Parsing (compiler.rs)
+### 1. Parsing (`src/compiler.rs`)
 ```
 Source Code → Tokenization → AST → Instruction Generation
 ```
@@ -120,7 +270,7 @@ Source Code → Tokenization → AST → Instruction Generation
 - Syntax error reporting
 - Instruction optimization hints
 
-### 2. Optimization (optimizer.rs)
+### 2. Optimization (`src/optimizer.rs`)
 8-pass optimization engine:
 
 ```rust
@@ -146,12 +296,18 @@ impl Optimizer {
 7. Tail call optimization
 8. Memory layout optimization
 
-### 3. Bytecode Generation (bytecode.rs)
-Binary format for faster loading:
+### 3. Bytecode Generation (`src/bytecode.rs`)
+Binary format for faster loading and unified instruction parsing:
 
 ```
 Magic Header | Version | Instruction Count | Instructions | Metadata
 ```
+
+**Key Features:**
+- **Unified parsing** - Single parser for all instruction types
+- **Label resolution** - Symbolic address resolution  
+- **Module imports** - Automatic dependency loading
+- **Error reporting** - Detailed parse error messages
 
 ## Execution Engine
 
