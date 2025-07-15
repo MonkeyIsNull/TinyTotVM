@@ -1,0 +1,68 @@
+; Comprehensive concurrency test
+; This test exercises all BEAM concurrency features
+
+PUSH_STR "=== Comprehensive Concurrency Test ==="
+PRINT
+
+; Test 1: Basic process spawning and communication
+PUSH_STR "Test 1: Basic process spawning and communication"
+PRINT
+REGISTER "main_test_process"
+PUSH_STR "worker_process"
+SPAWN
+STORE "worker_pid"
+LOAD "worker_pid"
+PRINT
+
+; Test 2: Name registry operations
+PUSH_STR "Test 2: Name registry operations"
+PRINT
+WHEREIS "main_test_process"
+PRINT
+
+; Test 3: Message passing
+PUSH_STR "Test 3: Message passing"
+PRINT
+PUSH_STR "Test message"
+SENDNAMED "main_test_process"
+RECEIVE
+PRINT
+
+; Test 4: Process linking
+PUSH_STR "Test 4: Process linking"
+PRINT
+LOAD "worker_pid"
+LINK 0  ; Replace with proper linking
+
+; Test 5: Process monitoring
+PUSH_STR "Test 5: Process monitoring"
+PRINT
+LOAD "worker_pid"
+MONITOR 0  ; Replace with proper monitoring
+
+; Test 6: Trap exit functionality
+PUSH_STR "Test 6: Trap exit functionality"
+PRINT
+PUSH_BOOL true
+TRAP_EXIT
+
+; Test 7: Supervisor functionality
+PUSH_STR "Test 7: Supervisor functionality"
+PRINT
+START_SUPERVISOR
+SUPERVISE_CHILD "test_child"
+
+; Test 8: Yield to scheduler
+PUSH_STR "Test 8: Yield to scheduler"
+PRINT
+YIELD
+
+; Test 9: Cleanup
+PUSH_STR "Test 9: Cleanup"
+PRINT
+UNREGISTER "main_test_process"
+
+PUSH_STR "All concurrency tests completed successfully!"
+PRINT
+
+HALT

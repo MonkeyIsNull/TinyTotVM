@@ -1,0 +1,29 @@
+; Simple registry test without spawn
+PUSH_STR "=== Simple Registry Test ==="
+PRINT
+
+; Register this process
+PUSH_STR "Registering process..."
+PRINT
+REGISTER "test_process"
+
+; Look up the process
+PUSH_STR "Looking up process..."
+PRINT
+WHEREIS "test_process"
+PRINT
+
+; Unregister
+PUSH_STR "Unregistering process..."
+PRINT
+UNREGISTER "test_process"
+
+; Look up again (should return 0)
+PUSH_STR "Looking up after unregister..."
+PRINT
+WHEREIS "test_process"
+PRINT
+
+PUSH_STR "Simple registry test completed"
+PRINT
+HALT

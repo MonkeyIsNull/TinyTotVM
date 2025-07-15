@@ -1,0 +1,24 @@
+; Barista worker process for coffee shop demo
+PUSH_STR "Barista process started"
+PRINT
+REGISTER "barista"
+PUSH_STR "Barista registered"
+PRINT
+
+; Wait for and handle status request
+RECEIVE
+PUSH_STR "Barista: Status request received - "
+PRINT
+PRINT
+PUSH_STR "Barista: Latte is ready!"
+PRINT
+
+; Wait for and handle thanks
+RECEIVE
+PUSH_STR "Barista: Received thanks - "
+PRINT
+PRINT
+PUSH_STR "Barista: You're welcome!"
+PRINT
+
+HALT

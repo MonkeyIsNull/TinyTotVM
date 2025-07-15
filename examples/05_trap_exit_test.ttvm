@@ -1,0 +1,37 @@
+; Test trap_exit functionality
+; This test demonstrates how processes can trap exit signals
+
+PUSH_STR "=== Trap Exit Test ==="
+PRINT
+
+; First, spawn a short-lived process that will exit
+PUSH_STR "Spawning short-lived process..."
+PRINT
+PUSH_STR "short_lived"
+SPAWN
+STORE "short_lived_pid"
+LOAD "short_lived_pid"
+PRINT
+
+; Enable trap_exit for this process
+PUSH_STR "Enabling trap_exit..."
+PRINT
+PUSH_BOOL true
+TRAP_EXIT
+
+; Link to the short-lived process
+PUSH_STR "Linking to short-lived process..."
+PRINT
+LOAD "short_lived_pid"
+LINK 0  ; Link to the process ID (this will be replaced with proper linking)
+
+; Wait for the exit signal (should arrive as a message instead of killing us)
+PUSH_STR "Waiting for exit signal..."
+PRINT
+RECEIVE
+PRINT
+
+PUSH_STR "Successfully trapped exit signal!"
+PRINT
+
+HALT

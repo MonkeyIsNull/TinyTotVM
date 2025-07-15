@@ -151,7 +151,7 @@ Establish conventions for message formats, such as:
 
 **Run with**:
 ```bash
-ttvm --smp examples/01_process_spawning.ttvm
+ttvm examples/01_process_spawning.ttvm
 ```
 
 ### 02_message_passing.ttvm
@@ -163,7 +163,7 @@ ttvm --smp examples/01_process_spawning.ttvm
 
 **Run with**:
 ```bash
-ttvm --smp examples/02_message_passing.ttvm
+ttvm examples/02_message_passing.ttvm
 ```
 
 ### 03_name_registry.ttvm
@@ -175,7 +175,7 @@ ttvm --smp examples/02_message_passing.ttvm
 
 **Run with**:
 ```bash
-ttvm --smp examples/03_name_registry.ttvm
+ttvm examples/03_name_registry.ttvm
 ```
 
 ### 04_comprehensive_workflow.ttvm
@@ -188,7 +188,25 @@ ttvm --smp examples/03_name_registry.ttvm
 
 **Run with**:
 ```bash
-ttvm --smp examples/04_comprehensive_workflow.ttvm
+ttvm examples/04_comprehensive_workflow.ttvm
+```
+
+### coffee_shop_demo.ttvm
+**Purpose**: Realistic actor model demonstration with multi-process coordination
+**Key Features**:
+- Three-actor workflow (Customer, Cashier, Barista)
+- Structured message passing with objects
+- Real-world business process modeling
+- Sequential workflow with proper synchronization
+- Comprehensive demonstration of BEAM-style patterns
+
+**Run with**:
+```bash
+# Recommended: Run as integrated test (avoids hanging)
+ttvm test-coffee-shop
+
+# File execution may hang with current SMP scheduler
+# ttvm examples/coffee_shop_demo.ttvm
 ```
 
 ## Best Practices
@@ -235,17 +253,17 @@ ttvm --smp examples/04_comprehensive_workflow.ttvm
 To run the examples with the TinyTotVM scheduler:
 
 ```bash
-# With SMP scheduler (required for concurrency examples)
-ttvm --smp examples/01_process_spawning.ttvm
+# SMP scheduler (enabled by default)
+ttvm examples/01_process_spawning.ttvm
 
-# With SMP scheduler 
-ttvm --smp examples/02_message_passing.ttvm
+# SMP scheduler with debugging output
+ttvm --debug examples/02_message_passing.ttvm
 
-# With debugging output (concurrency requires --smp)
-ttvm --smp --debug examples/03_name_registry.ttvm
+# SMP scheduler with process tracing
+ttvm --trace-procs examples/03_name_registry.ttvm
 
-# With process tracing (concurrency requires --smp)
-ttvm --smp --trace-procs examples/04_comprehensive_workflow.ttvm
+# Single-threaded mode (if needed)
+ttvm --no-smp examples/04_comprehensive_workflow.ttvm
 ```
 
 ## Advanced Topics

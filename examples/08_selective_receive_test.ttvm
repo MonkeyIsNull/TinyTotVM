@@ -1,0 +1,46 @@
+; Test selective receive functionality
+; This test demonstrates selective message receiving
+
+PUSH_STR "=== Selective Receive Test ==="
+PRINT
+
+; Register this process
+REGISTER "selective_receiver"
+PUSH_STR "Registered as 'selective_receiver'"
+PRINT
+
+; Send multiple types of messages to ourselves
+PUSH_STR "Sending string message..."
+PRINT
+PUSH_STR "Hello World"
+SEND 1
+
+PUSH_STR "Sending integer message..."
+PRINT
+PUSH_INT 42
+SEND 1
+
+PUSH_STR "Sending boolean message..."
+PRINT
+PUSH_BOOL true
+SEND 1
+
+; Use selective receive to get only the integer message
+PUSH_STR "Selectively receiving integer message..."
+PRINT
+; Note: RECEIVE_MATCH would need to be implemented in the compiler/parser
+; For now, we'll use regular RECEIVE
+RECEIVE
+PRINT
+
+PUSH_STR "Receiving remaining messages..."
+PRINT
+RECEIVE
+PRINT
+RECEIVE
+PRINT
+
+PUSH_STR "Selective receive test completed"
+PRINT
+
+HALT

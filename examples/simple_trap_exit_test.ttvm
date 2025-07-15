@@ -1,0 +1,19 @@
+; Simple trap exit test without spawn
+PUSH_STR "=== Simple Trap Exit Test ==="
+PRINT
+
+; Set trap exit to true
+PUSH_STR "Setting trap exit to true..."
+PRINT
+PUSH_BOOL true
+TRAP_EXIT
+
+; Set trap exit to false
+PUSH_STR "Setting trap exit to false..."
+PRINT
+PUSH_BOOL false
+TRAP_EXIT
+
+PUSH_STR "Simple trap exit test completed"
+PRINT
+HALT

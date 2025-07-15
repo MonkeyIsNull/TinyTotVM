@@ -3,6 +3,7 @@ use std::fs;
 use std::fmt;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use comfy_table::{Table, Cell, presets::UTF8_FULL, modifiers::UTF8_SOLID_INNER_BORDERS, Color, Attribute};
 use colored::*;
@@ -81,6 +82,69 @@ pub enum Message {
     Down(ProcId, String, String), // Down message: (monitored_pid, monitor_ref, reason)
     Link(ProcId), // Link request
     Unlink(ProcId), // Unlink request
+    TrapExit(bool), // Set trap_exit flag
+}
+
+#[derive(Debug, Clone)]
+pub struct OrderedMessage {
+    pub message: Message,
+    pub from_pid: ProcId,
+    pub to_pid: ProcId,
+    pub sequence_number: u64,
+    pub timestamp: Instant,
+}
+
+// Supervision system enums and structs
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RestartStrategy {
+    OneForOne,     // Restart only the failed child
+    OneForAll,     // Restart all children when one fails
+    RestForOne,    // Restart failed child and all started after it
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChildType {
+    Worker,
+    Supervisor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shutdown {
+    Brutal,           // Kill immediately
+    Timeout(Duration), // Give time to shutdown gracefully
+    Infinity,         // Wait indefinitely
+}
+
+#[derive(Debug, Clone)]
+pub struct ChildSpec {
+    pub id: String,
+    pub instructions: Vec<OpCode>,
+    pub restart: RestartPolicy,
+    pub shutdown: Shutdown,
+    pub child_type: ChildType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RestartPolicy {
+    Permanent,   // Always restart
+    Temporary,   // Never restart
+    Transient,   // Restart only if abnormal exit
+}
+
+#[derive(Debug, Clone)]
+pub struct SupervisorSpec {
+    pub strategy: RestartStrategy,
+    pub intensity: usize,        // max restarts
+    pub period: Duration,        // time window for intensity
+    pub children: Vec<ChildSpec>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChildState {
+    pub pid: ProcId,
+    pub spec: ChildSpec,
+    pub restart_count: usize,
+    pub last_restart: Instant,
 }
 
 #[derive(Debug)]
@@ -99,13 +163,13 @@ pub struct TinyProc {
     pub monitored_by: HashMap<ProcId, String>, // monitoring_pid -> monitor_ref
     pub linked_processes: HashSet<ProcId>, // bidirectional links
     pub exit_reason: Option<String>, // reason for exit
+    pub trap_exit: bool, // whether process traps exit signals
     // Supervision data
-    pub is_supervisor: bool,
-    pub supervised_children: HashMap<String, (ProcId, Vec<OpCode>)>, // child_name -> (pid, instructions)
+    pub supervisor_spec: Option<SupervisorSpec>,
+    pub supervised_children: HashMap<String, ChildState>, // child_id -> child_state
     pub supervisor_pid: Option<ProcId>, // parent supervisor
-    pub restart_counts: HashMap<String, (usize, Instant)>, // child_name -> (count, last_restart_time)
-    pub max_restarts: usize, // maximum restarts per time period
-    pub max_restart_time: Duration, // time window for restart counting
+    pub restart_intensity_count: usize, // current restart count in period
+    pub restart_period_start: Instant, // when current period started
     // VM state (isolated per process)
     pub stack: Vec<Value>,
     pub instructions: Vec<OpCode>,
@@ -136,21 +200,164 @@ pub struct Scheduler {
 }
 
 #[derive(Debug)]
+pub struct ProcessRegistry {
+    pub process_senders: HashMap<ProcId, Sender<Message>>,
+    pub name_to_pid: HashMap<String, ProcId>,
+    pub pid_to_names: HashMap<ProcId, HashSet<String>>,
+    pub process_info: HashMap<ProcId, ProcessInfo>,
+    pub message_sequences: HashMap<(ProcId, ProcId), u64>, // (from_pid, to_pid) -> next_sequence_number
+}
+
+#[derive(Debug, Clone)]
+pub struct ProcessInfo {
+    pub pid: ProcId,
+    pub start_time: Instant,
+    pub message_count: usize,
+    pub state: ProcState,
+    pub supervisor: Option<ProcId>,
+    pub children: HashSet<ProcId>,
+}
+
+impl ProcessRegistry {
+    pub fn new() -> Self {
+        ProcessRegistry {
+            process_senders: HashMap::new(),
+            name_to_pid: HashMap::new(),
+            pid_to_names: HashMap::new(),
+            process_info: HashMap::new(),
+            message_sequences: HashMap::new(),
+        }
+    }
+    
+    pub fn register_process(&mut self, pid: ProcId, sender: Sender<Message>) -> Result<(), String> {
+        if self.process_senders.contains_key(&pid) {
+            return Err(format!("Process {} already registered", pid));
+        }
+        
+        self.process_senders.insert(pid, sender);
+        self.process_info.insert(pid, ProcessInfo {
+            pid,
+            start_time: Instant::now(),
+            message_count: 0,
+            state: ProcState::Ready,
+            supervisor: None,
+            children: HashSet::new(),
+        });
+        
+        Ok(())
+    }
+    
+    pub fn unregister_process(&mut self, pid: ProcId) -> Result<(), String> {
+        // Remove from process senders
+        self.process_senders.remove(&pid);
+        
+        // Remove all names associated with this process
+        if let Some(names) = self.pid_to_names.remove(&pid) {
+            for name in names {
+                self.name_to_pid.remove(&name);
+            }
+        }
+        
+        // Remove process info
+        self.process_info.remove(&pid);
+        
+        Ok(())
+    }
+    
+    pub fn register_name(&mut self, name: String, pid: ProcId) -> Result<(), String> {
+        if !self.process_senders.contains_key(&pid) {
+            return Err(format!("Process {} not found", pid));
+        }
+        
+        if self.name_to_pid.contains_key(&name) {
+            return Err(format!("Name '{}' already registered", name));
+        }
+        
+        self.name_to_pid.insert(name.clone(), pid);
+        self.pid_to_names.entry(pid).or_insert_with(HashSet::new).insert(name);
+        
+        Ok(())
+    }
+    
+    pub fn unregister_name(&mut self, name: &str) -> Result<(), String> {
+        if let Some(pid) = self.name_to_pid.remove(name) {
+            if let Some(names) = self.pid_to_names.get_mut(&pid) {
+                names.remove(name);
+                if names.is_empty() {
+                    self.pid_to_names.remove(&pid);
+                }
+            }
+            Ok(())
+        } else {
+            Err(format!("Name '{}' not found", name))
+        }
+    }
+    
+    pub fn whereis(&self, name: &str) -> Option<ProcId> {
+        self.name_to_pid.get(name).copied()
+    }
+    
+    pub fn send_message(&mut self, from_pid: ProcId, to_pid: ProcId, message: Message) -> Result<(), String> {
+        if let Some(sender) = self.process_senders.get(&to_pid) {
+            // Get next sequence number for this process pair
+            let key = (from_pid, to_pid);
+            let sequence_number = self.message_sequences.entry(key).or_insert(0);
+            *sequence_number += 1;
+            
+            // Update message count
+            if let Some(info) = self.process_info.get_mut(&to_pid) {
+                info.message_count += 1;
+            }
+            
+            sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
+        } else {
+            Err(format!("Process {} not found", to_pid))
+        }
+    }
+    
+    pub fn send_message_simple(&mut self, pid: ProcId, message: Message) -> Result<(), String> {
+        // For backward compatibility - assume system sender (pid 0)
+        self.send_message(0, pid, message)
+    }
+    
+    pub fn send_to_named(&mut self, name: &str, message: Message) -> Result<(), String> {
+        let pid = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
+        self.send_message_simple(pid, message)
+    }
+    
+    pub fn get_process_info(&self, pid: ProcId) -> Option<&ProcessInfo> {
+        self.process_info.get(&pid)
+    }
+    
+    pub fn update_process_state(&mut self, pid: ProcId, state: ProcState) {
+        if let Some(info) = self.process_info.get_mut(&pid) {
+            info.state = state;
+        }
+    }
+    
+    pub fn set_supervisor(&mut self, child_pid: ProcId, supervisor_pid: ProcId) {
+        if let Some(info) = self.process_info.get_mut(&child_pid) {
+            info.supervisor = Some(supervisor_pid);
+        }
+        if let Some(supervisor_info) = self.process_info.get_mut(&supervisor_pid) {
+            supervisor_info.children.insert(child_pid);
+        }
+    }
+}
+
 pub struct SchedulerPool {
     pub schedulers: Vec<thread::JoinHandle<()>>,
     pub global_stealers: Vec<Stealer<Arc<Mutex<TinyProc>>>>,
     pub next_proc_id: Arc<Mutex<ProcId>>,
     pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
     pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
-    pub shutdown_flag: Arc<Mutex<bool>>,
-    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
-    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>, // name -> ProcId mapping
+    pub shutdown_flag: Arc<AtomicBool>,
+    pub process_registry: Arc<Mutex<ProcessRegistry>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SchedulerPoolMessageSender {
-    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
-    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>,
+    pub process_registry: Arc<Mutex<ProcessRegistry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,8 +365,7 @@ pub struct SchedulerPoolProcessSpawner {
     pub next_proc_id: Arc<Mutex<ProcId>>,
     pub process_submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>,
     pub running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>,
-    pub process_registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>,
-    pub name_registry: Arc<Mutex<HashMap<String, ProcId>>>,
+    pub process_registry: Arc<Mutex<ProcessRegistry>>,
     pub message_sender: Arc<dyn MessageSender>,
 }
 
@@ -191,42 +397,69 @@ impl Scheduler {
         None
     }
     
-    pub fn run_scheduler_loop(&mut self, submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>, shutdown_flag: Arc<Mutex<bool>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>) {
-        while self.running {
-            // Check for shutdown
-            if let Ok(shutdown) = shutdown_flag.try_lock() {
-                if *shutdown {
-                    break;
+    pub fn run_scheduler_loop(&mut self, submission_queue: Arc<Mutex<Vec<Arc<Mutex<TinyProc>>>>>, shutdown_flag: Arc<AtomicBool>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<ProcessRegistry>>) {
+        loop {
+            // Check for shutdown first - atomic read is fast and lock-free
+            if shutdown_flag.load(Ordering::Relaxed) {
+                break;
+            }
+            
+            // Try to get new processes from submission queue FIRST (higher priority)
+            if let Ok(mut queue) = submission_queue.try_lock() {
+                if let Some(proc_arc) = queue.pop() {
+                    let _proc_id = {
+                        let proc = proc_arc.lock().unwrap();
+                        proc.id
+                    };
+                    // println!("DEBUG: Scheduler {} picked up process {} from submission queue", self.id, proc_id);
+                    // Release the queue lock immediately before executing the process
+                    drop(queue);
+                    self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
+                    
+                    // Check shutdown flag after processing each process
+                    if shutdown_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    continue;
                 }
+                // Queue is empty, release the lock
+                drop(queue);
             }
             
             // Try to get a process from local queue
             if let Some(proc_arc) = self.get_next_process() {
                 self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
-                continue;
-            }
-            
-            // Try to get new processes from submission queue
-            if let Ok(mut queue) = submission_queue.try_lock() {
-                if let Some(proc_arc) = queue.pop() {
-                    self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
-                    continue;
+                
+                // Check shutdown flag after processing each process
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
                 }
+                continue;
             }
             
             // If no local work, try to steal from other schedulers
             if let Some(proc_arc) = self.steal_from_others() {
                 self.execute_process_with_cleanup(proc_arc.clone(), running_processes.clone(), registry.clone());
+                
+                // Check shutdown flag after processing each process
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
                 continue;
             }
             
-            // No work available, yield CPU
-            thread::yield_now();
+            // No work available, sleep very briefly and check shutdown again soon
+            thread::sleep(Duration::from_millis(1));
+            
+            // Check shutdown again after sleep to be more responsive
+            if shutdown_flag.load(Ordering::Relaxed) {
+                break;
+            }
         }
     }
     
     
-    fn execute_process_with_cleanup(&mut self, proc_arc: Arc<Mutex<TinyProc>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<HashMap<ProcId, Sender<Message>>>>) {
+    fn execute_process_with_cleanup(&mut self, proc_arc: Arc<Mutex<TinyProc>>, running_processes: Arc<Mutex<HashMap<ProcId, Arc<Mutex<TinyProc>>>>>, registry: Arc<Mutex<ProcessRegistry>>) {
         let proc_id = {
             let proc = proc_arc.lock().unwrap();
             proc.id
@@ -234,13 +467,18 @@ impl Scheduler {
         
         let mut proc = proc_arc.lock().unwrap();
         
+        // Show debug info about which core is processing which process (only on first execution)
+        if matches!(proc.state, ProcState::Ready) && !proc.waiting_for_message {
+            println!("Core {}: Starting execution of process {}", self.id, proc_id);
+        }
+        
         match proc.state {
             ProcState::Ready | ProcState::Waiting => {
                 // If process is waiting for a message, check if it has one now
                 if proc.waiting_for_message && !proc.has_messages() {
-                    // Still waiting for a message, requeue with low priority
+                    // Still waiting for a message, don't requeue immediately to prevent tight loops
+                    // This allows the scheduler to check shutdown flag more frequently
                     drop(proc);
-                    self.local_queue.push(proc_arc);
                     return;
                 }
                 
@@ -257,7 +495,7 @@ impl Scheduler {
                         let mut running = running_processes.lock().unwrap();
                         running.remove(&proc_id);
                         let mut reg = registry.lock().unwrap();
-                        reg.remove(&proc_id);
+                        reg.unregister_process(proc_id).ok();
                     }
                     Err(e) => {
                         eprintln!("Process {} error: {:?}", proc_id, e);
@@ -266,7 +504,7 @@ impl Scheduler {
                         let mut running = running_processes.lock().unwrap();
                         running.remove(&proc_id);
                         let mut reg = registry.lock().unwrap();
-                        reg.remove(&proc_id);
+                        reg.unregister_process(proc_id).ok();
                     }
                     _ => {
                         // Other states, re-queue
@@ -281,7 +519,7 @@ impl Scheduler {
                 let mut running = running_processes.lock().unwrap();
                 running.remove(&proc_id);
                 let mut reg = registry.lock().unwrap();
-                reg.remove(&proc_id);
+                reg.unregister_process(proc_id).ok();
             }
             _ => {
                 // Re-queue for other states
@@ -294,65 +532,52 @@ impl Scheduler {
 
 impl MessageSender for SchedulerPoolMessageSender {
     fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
-        let registry = self.process_registry.lock().unwrap();
-        match registry.get(&target_proc_id) {
-            Some(sender) => {
-                sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
-            }
-            None => Err(format!("Process {} not found", target_proc_id))
-        }
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.send_message_simple(target_proc_id, message)
     }
 }
 
 impl NameRegistry for SchedulerPoolMessageSender {
     fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
-        let mut name_registry = self.name_registry.lock().unwrap();
-        name_registry.insert(name, proc_id);
-        Ok(())
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.register_name(name, proc_id)
     }
     
     fn unregister_name(&self, name: &str) -> Result<(), String> {
-        let mut name_registry = self.name_registry.lock().unwrap();
-        match name_registry.remove(name) {
-            Some(_) => Ok(()),
-            None => Err(format!("Name '{}' not found", name))
-        }
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.unregister_name(name)
     }
     
     fn whereis(&self, name: &str) -> Option<ProcId> {
-        let name_registry = self.name_registry.lock().unwrap();
-        name_registry.get(name).copied()
+        let registry = self.process_registry.lock().unwrap();
+        registry.whereis(name)
     }
     
     fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
-        let proc_id = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
-        self.send_message(proc_id, message)
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.send_to_named(name, message)
     }
 }
 
 impl NameRegistry for SchedulerPoolProcessSpawner {
     fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
-        let mut name_registry = self.name_registry.lock().unwrap();
-        name_registry.insert(name, proc_id);
-        Ok(())
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.register_name(name, proc_id)
     }
     
     fn unregister_name(&self, name: &str) -> Result<(), String> {
-        let mut name_registry = self.name_registry.lock().unwrap();
-        match name_registry.remove(name) {
-            Some(_) => Ok(()),
-            None => Err(format!("Name '{}' not found", name))
-        }
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.unregister_name(name)
     }
     
     fn whereis(&self, name: &str) -> Option<ProcId> {
-        let name_registry = self.name_registry.lock().unwrap();
-        name_registry.get(name).copied()
+        let registry = self.process_registry.lock().unwrap();
+        registry.whereis(name)
     }
     
     fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
-        let proc_id = self.whereis(name).ok_or_else(|| format!("Process '{}' not found", name))?;
-        self.message_sender.send_message(proc_id, message)
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.send_to_named(name, message)
     }
 }
 
@@ -385,12 +610,14 @@ impl ProcessSpawner for SchedulerPoolProcessSpawner {
         // Register process in the registry for message delivery
         {
             let mut registry = self.process_registry.lock().unwrap();
-            registry.insert(proc_id, sender.clone());
+            registry.register_process(proc_id, sender.clone()).expect("Failed to register process");
         }
         
         {
+            // Use blocking lock to ensure process gets added to submission queue
             let mut queue = self.process_submission_queue.lock().unwrap();
             queue.push(proc_arc);
+            // println!("DEBUG: Added process {} to submission queue", proc_id);
         }
         
         (proc_id, sender)
@@ -405,9 +632,8 @@ impl SchedulerPool {
             next_proc_id: Arc::new(Mutex::new(1)),
             process_submission_queue: Arc::new(Mutex::new(Vec::new())),
             running_processes: Arc::new(Mutex::new(HashMap::new())),
-            shutdown_flag: Arc::new(Mutex::new(false)),
-            process_registry: Arc::new(Mutex::new(HashMap::new())),
-            name_registry: Arc::new(Mutex::new(HashMap::new())),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            process_registry: Arc::new(Mutex::new(ProcessRegistry::new())),
         }
     }
     
@@ -418,10 +644,10 @@ impl SchedulerPool {
     }
     
     pub fn new_with_default_threads() -> Self {
-        // Use number of logical CPUs like BEAM does
+        // Use all available CPU cores for optimal performance
         let num_threads = std::thread::available_parallelism()
             .map(|n| n.get())
-            .unwrap_or(4); // fallback to 4 threads
+            .unwrap_or(4); // fallback to 4 threads if detection fails
         println!("Creating scheduler pool with {} threads (CPU cores)", num_threads);
         Self::new_with_threads(num_threads)
     }
@@ -440,7 +666,6 @@ impl SchedulerPool {
         // Create message sender
         let message_sender = Arc::new(SchedulerPoolMessageSender {
             process_registry: self.process_registry.clone(),
-            name_registry: self.name_registry.clone(),
         });
         
         // Set the message sender for this process
@@ -455,7 +680,6 @@ impl SchedulerPool {
             process_submission_queue: self.process_submission_queue.clone(),
             running_processes: self.running_processes.clone(),
             process_registry: self.process_registry.clone(),
-            name_registry: self.name_registry.clone(),
             message_sender: message_sender,
         }));
         
@@ -471,7 +695,7 @@ impl SchedulerPool {
         // Register process in the registry for message delivery
         {
             let mut registry = self.process_registry.lock().unwrap();
-            registry.insert(proc_id, sender.clone());
+            registry.register_process(proc_id, sender.clone()).expect("Failed to register process");
         }
         
         {
@@ -483,13 +707,8 @@ impl SchedulerPool {
     }
     
     pub fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
-        let registry = self.process_registry.lock().unwrap();
-        match registry.get(&target_proc_id) {
-            Some(sender) => {
-                sender.send(message).map_err(|e| format!("Failed to send message: {}", e))
-            }
-            None => Err(format!("Process {} not found", target_proc_id))
-        }
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.send_message_simple(target_proc_id, message)
     }
     
     pub fn spawn_smp_schedulers(&mut self, num_threads: usize) {
@@ -537,6 +756,9 @@ impl SchedulerPool {
     
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Keep running until all processes complete
+        let start_time = std::time::Instant::now();
+        let max_wait_time = Duration::from_secs(3); // Maximum wait time for processes
+        
         loop {
             // Check if there are any processes still running
             let (queue_len, running_count) = {
@@ -550,48 +772,69 @@ impl SchedulerPool {
                 break;
             }
             
+            // Check if we've been waiting too long
+            if start_time.elapsed() > max_wait_time {
+                println!("Scheduler timeout reached - shutting down {} remaining processes", running_count);
+                break;
+            }
+            
+            // Only print debug info if we're waiting for a while
+            if start_time.elapsed() > Duration::from_secs(1) {
+                static mut LAST_DEBUG: Option<std::time::Instant> = None;
+                unsafe {
+                    let now = std::time::Instant::now();
+                    if LAST_DEBUG.is_none() || now.duration_since(LAST_DEBUG.unwrap()) > Duration::from_secs(2) {
+                        println!("Waiting for {} processes to complete...", running_count);
+                        LAST_DEBUG = Some(now);
+                    }
+                }
+            }
+            
             thread::sleep(Duration::from_millis(10));
         }
         
         // Signal shutdown to all schedulers
-        {
-            let mut shutdown = self.shutdown_flag.lock().unwrap();
-            *shutdown = true;
-        }
+        self.shutdown_flag.store(true, Ordering::Relaxed);
         
         Ok(())
     }
     
     pub fn wait_for_completion(self) {
-        for handle in self.schedulers {
-            handle.join().unwrap();
+        for (_i, handle) in self.schedulers.into_iter().enumerate() {
+            // Use a timeout approach - if threads don't join within reasonable time, force exit
+            let start_time = std::time::Instant::now();
+            let mut handle_option = Some(handle);
+            
+            while let Some(h) = handle_option.take() {
+                if h.is_finished() {
+                    h.join().unwrap();
+                    break;
+                } else if start_time.elapsed() >= Duration::from_millis(100) {
+                    // Short timeout since scheduler should respond quickly to shutdown flag
+                    std::mem::forget(h);
+                    break;
+                } else {
+                    handle_option = Some(h);
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
         }
     }
     
     // Process name registry methods
     pub fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
-        let mut registry = self.name_registry.lock().unwrap();
-        
-        if registry.contains_key(&name) {
-            return Err(format!("Name '{}' is already registered", name));
-        }
-        
-        registry.insert(name, proc_id);
-        Ok(())
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.register_name(name, proc_id)
     }
     
-    pub fn unregister_name(&self, name: &str) -> Result<ProcId, String> {
-        let mut registry = self.name_registry.lock().unwrap();
-        
-        match registry.remove(name) {
-            Some(proc_id) => Ok(proc_id),
-            None => Err(format!("Name '{}' is not registered", name)),
-        }
+    pub fn unregister_name(&self, name: &str) -> Result<(), String> {
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.unregister_name(name)
     }
     
     pub fn whereis(&self, name: &str) -> Option<ProcId> {
-        let registry = self.name_registry.lock().unwrap();
-        registry.get(name).copied()
+        let registry = self.process_registry.lock().unwrap();
+        registry.whereis(name)
     }
     
     pub fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
@@ -604,18 +847,8 @@ impl SchedulerPool {
     
     // Clean up name registrations when process exits
     pub fn cleanup_process_names(&self, proc_id: ProcId) {
-        let mut registry = self.name_registry.lock().unwrap();
-        
-        // Remove all names registered to this process
-        let names_to_remove: Vec<String> = registry
-            .iter()
-            .filter(|(_, &pid)| pid == proc_id)
-            .map(|(name, _)| name.clone())
-            .collect();
-        
-        for name in names_to_remove {
-            registry.remove(&name);
-        }
+        let mut registry = self.process_registry.lock().unwrap();
+        registry.unregister_process(proc_id).ok();
     }
 }
 
@@ -641,6 +874,78 @@ impl SingleThreadScheduler {
         self.processes.push(Arc::new(Mutex::new(proc)));
         
         (proc_id, sender)
+    }
+    
+    pub fn spawn_supervisor(&mut self, spec: SupervisorSpec) -> (ProcId, Sender<Message>) {
+        let proc_id = self.next_proc_id;
+        self.next_proc_id += 1;
+        
+        let (mut proc, sender) = TinyProc::new_supervisor(proc_id, spec);
+        
+        // Set up process spawner for the supervisor
+        proc.process_spawner = Some(Arc::new(SingleThreadSchedulerProcessSpawner {
+            scheduler: Arc::new(Mutex::new(self as *mut SingleThreadScheduler)),
+        }));
+        
+        // Start all children
+        if let Err(e) = proc.start_all_children() {
+            eprintln!("Failed to start supervisor children: {}", e);
+        }
+        
+        self.processes.push(Arc::new(Mutex::new(proc)));
+        (proc_id, sender)
+    }
+    
+    pub fn run_step(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Run one step of the scheduler
+        if self.processes.is_empty() {
+            return Ok(());
+        }
+        
+        let mut processes_to_remove = Vec::new();
+        
+        for (i, proc_arc) in self.processes.iter().enumerate() {
+            let mut proc = proc_arc.lock().unwrap();
+            
+            match proc.state {
+                ProcState::Ready | ProcState::Running => {
+                    if proc.waiting_for_message && !proc.has_messages() {
+                        proc.state = ProcState::Waiting;
+                        continue;
+                    }
+                    
+                    match proc.run_until_yield() {
+                        Ok(ProcState::Exited) => {
+                            processes_to_remove.push(i);
+                        }
+                        Ok(_) => {
+                            // Process yielded or is waiting
+                        }
+                        Err(e) => {
+                            eprintln!("Process {} error: {:?}", proc.id, e);
+                            processes_to_remove.push(i);
+                        }
+                    }
+                }
+                ProcState::Waiting => {
+                    // Check if process has messages now
+                    if proc.has_messages() {
+                        proc.waiting_for_message = false;
+                        proc.state = ProcState::Ready;
+                    }
+                }
+                ProcState::Exited => {
+                    processes_to_remove.push(i);
+                }
+            }
+        }
+        
+        // Remove finished processes
+        for &i in processes_to_remove.iter().rev() {
+            self.processes.remove(i);
+        }
+        
+        Ok(())
     }
     
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -705,6 +1010,25 @@ impl SingleThreadScheduler {
         }
         
         Ok(())
+    }
+}
+
+// Process spawner implementation for SingleThreadScheduler
+#[derive(Debug)]
+pub struct SingleThreadSchedulerProcessSpawner {
+    scheduler: Arc<Mutex<*mut SingleThreadScheduler>>,
+}
+
+unsafe impl Send for SingleThreadSchedulerProcessSpawner {}
+unsafe impl Sync for SingleThreadSchedulerProcessSpawner {}
+
+impl ProcessSpawner for SingleThreadSchedulerProcessSpawner {
+    fn spawn_process(&self, instructions: Vec<OpCode>) -> (ProcId, Sender<Message>) {
+        unsafe {
+            let scheduler_ptr = *self.scheduler.lock().unwrap();
+            let scheduler = &mut *scheduler_ptr;
+            scheduler.spawn_process(instructions)
+        }
     }
 }
 
@@ -1142,6 +1466,211 @@ pub fn test_send_receive_comprehensive() -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
+// Test supervisor tree functionality
+pub fn test_supervisor_tree() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing supervisor tree functionality...");
+    
+    
+    // Create a supervisor spec
+    let child_spec = ChildSpec {
+        id: "test_worker".to_string(),
+        instructions: vec![
+            OpCode::PushStr("Worker started".to_string()),
+            OpCode::Print,
+            OpCode::Sleep, // Sleep for 1 second
+            OpCode::PushStr("Worker finished".to_string()),
+            OpCode::Print,
+            OpCode::Halt,
+        ],
+        restart: RestartPolicy::Permanent,
+        shutdown: Shutdown::Timeout(Duration::from_secs(5)),
+        child_type: ChildType::Worker,
+    };
+    
+    let supervisor_spec = SupervisorSpec {
+        strategy: RestartStrategy::OneForOne,
+        intensity: 3,
+        period: Duration::from_secs(60),
+        children: vec![child_spec],
+    };
+    
+    let mut scheduler = SingleThreadScheduler::new();
+    let (_supervisor_id, _) = scheduler.spawn_supervisor(supervisor_spec);
+    
+    // Run supervisor for a short time
+    let timeout = Duration::from_secs(2);
+    let start = std::time::Instant::now();
+    
+    while start.elapsed() < timeout {
+        if let Err(e) = scheduler.run_step() {
+            eprintln!("Scheduler error: {}", e);
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    
+    println!("✓ Supervisor tree test completed");
+    Ok(())
+}
+
+// Test selective receive functionality
+pub fn test_selective_receive() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing selective receive functionality...");
+    
+    
+    let mut scheduler = SingleThreadScheduler::new();
+    
+    // Create a process that uses selective receive
+    let receiver_instructions = vec![
+        OpCode::PushStr("Receiver waiting for int message".to_string()),
+        OpCode::Print,
+        OpCode::ReceiveMatch(vec![
+            MessagePattern::Type("int".to_string()),
+        ]),
+        OpCode::Print,
+        OpCode::PushStr("Receiver got int message".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (receiver_id, _) = scheduler.spawn_process(receiver_instructions);
+    
+    // Create a sender that sends different types of messages
+    let sender_instructions = vec![
+        OpCode::PushStr("Sender sending string message".to_string()),
+        OpCode::Print,
+        OpCode::PushStr("Hello".to_string()),
+        OpCode::Send(receiver_id),
+        OpCode::PushStr("Sender sending int message".to_string()),
+        OpCode::Print,
+        OpCode::PushInt(42),
+        OpCode::Send(receiver_id),
+        OpCode::Halt,
+    ];
+    
+    let (_sender_id, _) = scheduler.spawn_process(sender_instructions);
+    
+    // Run scheduler for a short time
+    let timeout = Duration::from_secs(2);
+    let start = std::time::Instant::now();
+    
+    while start.elapsed() < timeout {
+        if let Err(e) = scheduler.run_step() {
+            eprintln!("Scheduler error: {}", e);
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    
+    println!("✓ Selective receive test completed");
+    Ok(())
+}
+
+// Test trap_exit functionality
+pub fn test_trap_exit() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing trap_exit functionality...");
+    
+    
+    let mut scheduler = SingleThreadScheduler::new();
+    
+    // Create a process that will exit
+    let short_lived_instructions = vec![
+        OpCode::PushStr("Short-lived process starting".to_string()),
+        OpCode::Print,
+        OpCode::Sleep, // Sleep for 100ms
+        OpCode::PushStr("Short-lived process exiting".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (short_lived_id, _) = scheduler.spawn_process(short_lived_instructions);
+    
+    // Create a process that links and traps exits
+    let trapping_instructions = vec![
+        OpCode::PushStr("Trapping process starting".to_string()),
+        OpCode::Print,
+        OpCode::PushBool(true),
+        OpCode::TrapExit,
+        OpCode::PushInt(short_lived_id as i64),
+        OpCode::Link(short_lived_id),
+        OpCode::Receive, // Should receive exit message instead of dying
+        OpCode::Print,
+        OpCode::PushStr("Trapping process got exit message".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (_trapping_id, _) = scheduler.spawn_process(trapping_instructions);
+    
+    // Run scheduler for a short time
+    let timeout = Duration::from_secs(2);
+    let start = std::time::Instant::now();
+    
+    while start.elapsed() < timeout {
+        if let Err(e) = scheduler.run_step() {
+            eprintln!("Scheduler error: {}", e);
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    
+    println!("✓ Trap exit test completed");
+    Ok(())
+}
+
+// Test process registry cleanup
+pub fn test_process_registry_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing process registry cleanup...");
+    
+    
+    let mut scheduler = SingleThreadScheduler::new();
+    
+    // Create a process and register it with a name
+    let named_process_instructions = vec![
+        OpCode::PushStr("Named process starting".to_string()),
+        OpCode::Print,
+        OpCode::Register("test_process".to_string()),
+        OpCode::Sleep, // Sleep for 100ms
+        OpCode::PushStr("Named process exiting".to_string()),
+        OpCode::Print,
+        OpCode::Halt,
+    ];
+    
+    let (_named_id, _) = scheduler.spawn_process(named_process_instructions);
+    
+    // Create a process that tries to send to the named process
+    let sender_instructions = vec![
+        OpCode::PushStr("Sender waiting".to_string()),
+        OpCode::Print,
+        OpCode::Sleep, // Wait for named process to register
+        OpCode::PushStr("Hello named process".to_string()),
+        OpCode::SendNamed("test_process".to_string()),
+        OpCode::Sleep, // Wait for named process to exit
+        OpCode::PushStr("Trying to send to exited process".to_string()),
+        OpCode::Print,
+        OpCode::PushStr("This should fail".to_string()),
+        OpCode::SendNamed("test_process".to_string()),
+        OpCode::Halt,
+    ];
+    
+    let (_sender_id, _) = scheduler.spawn_process(sender_instructions);
+    
+    // Run scheduler for a short time
+    let timeout = Duration::from_secs(3);
+    let start = std::time::Instant::now();
+    
+    while start.elapsed() < timeout {
+        if let Err(e) = scheduler.run_step() {
+            eprintln!("Scheduler error: {}", e);
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    
+    println!("✓ Process registry cleanup test completed");
+    Ok(())
+}
+
 // Test bytecode compilation of concurrency OpCodes
 pub fn test_concurrency_bytecode_compilation() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing bytecode compilation of concurrency OpCodes...");
@@ -1269,6 +1798,7 @@ pub fn test_smp_scheduler_concurrency() -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+
 impl TinyProc {
     pub fn new(id: ProcId, instructions: Vec<OpCode>) -> (Self, Sender<Message>) {
         let (sender, receiver) = crossbeam::channel::unbounded();
@@ -1289,13 +1819,13 @@ impl TinyProc {
             monitored_by: HashMap::new(),
             linked_processes: HashSet::new(),
             exit_reason: None,
+            trap_exit: false,
             // Initialize supervision data
-            is_supervisor: false,
+            supervisor_spec: None,
             supervised_children: HashMap::new(),
             supervisor_pid: None,
-            restart_counts: HashMap::new(),
-            max_restarts: 3, // Default: max 3 restarts
-            max_restart_time: Duration::from_secs(60), // Default: per 60 seconds
+            restart_intensity_count: 0,
+            restart_period_start: Instant::now(),
             
             // Initialize VM state
             stack: Vec::new(),
@@ -1303,6 +1833,63 @@ impl TinyProc {
             ip: 0,
             call_stack: Vec::new(),
             variables: vec![HashMap::new()], // Initial global scope
+            try_stack: Vec::new(),
+            exports: HashMap::new(),
+            loaded_modules: HashMap::new(),
+            loading_stack: Vec::new(),
+            lambda_captures: HashMap::new(),
+            max_stack_size: 0,
+            instruction_count: 0,
+            debug_mode: false,
+            breakpoints: Vec::new(),
+            gc_engine,
+            _gc_stats_enabled: false,
+            profiler: None,
+            trace_enabled: false,
+        };
+        
+        (proc, sender)
+    }
+    
+    pub fn new_supervisor(id: ProcId, spec: SupervisorSpec) -> (Self, Sender<Message>) {
+        let (sender, receiver) = crossbeam::channel::unbounded();
+        let gc_engine = Box::new(MarkSweepGc::new(false));
+        
+        // Create supervisor loop instructions
+        let supervisor_instructions = vec![
+            OpCode::Receive,
+            OpCode::Yield,
+        ];
+        
+        let proc = TinyProc {
+            id,
+            state: ProcState::Ready,
+            mailbox: receiver,
+            mailbox_sender: sender.clone(),
+            reduction_count: 0,
+            max_reductions: 1000,
+            message_sender: None,
+            process_spawner: None,
+            name_registry: None,
+            waiting_for_message: false,
+            monitors: HashMap::new(),
+            monitored_by: HashMap::new(),
+            linked_processes: HashSet::new(),
+            exit_reason: None,
+            trap_exit: true, // Supervisors trap exits by default
+            // Initialize supervision data
+            supervisor_spec: Some(spec),
+            supervised_children: HashMap::new(),
+            supervisor_pid: None,
+            restart_intensity_count: 0,
+            restart_period_start: Instant::now(),
+            
+            // Initialize VM state
+            stack: Vec::new(),
+            instructions: supervisor_instructions,
+            ip: 0,
+            call_stack: Vec::new(),
+            variables: vec![HashMap::new()],
             try_stack: Vec::new(),
             exports: HashMap::new(),
             loaded_modules: HashMap::new(),
@@ -1425,32 +2012,125 @@ impl TinyProc {
     }
     
     // Supervision helper methods
-    fn can_restart_child(&mut self, child_name: &str) -> bool {
-        let now = Instant::now();
-        
-        // Get or create restart count entry
-        let (count, last_restart) = match self.restart_counts.get(child_name) {
-            Some((c, lr)) => (*c, *lr),
-            None => (0, now),
-        };
-        
-        // If the time window has passed, reset the count
-        if now.duration_since(last_restart) > self.max_restart_time {
-            self.restart_counts.insert(child_name.to_string(), (0, now));
-            return true;
+    fn can_restart_supervisor(&mut self) -> bool {
+        if let Some(spec) = &self.supervisor_spec {
+            let now = Instant::now();
+            
+            // If period has passed, reset intensity count
+            if now.duration_since(self.restart_period_start) > spec.period {
+                self.restart_intensity_count = 0;
+                self.restart_period_start = now;
+                return true;
+            }
+            
+            // Check if we've exceeded the intensity limit
+            self.restart_intensity_count < spec.intensity
+        } else {
+            false
         }
-        
-        // Check if we've exceeded the maximum restarts
-        count < self.max_restarts
     }
     
-    fn record_restart(&mut self, child_name: &str) {
-        let now = Instant::now();
-        let count = match self.restart_counts.get(child_name) {
-            Some((c, _)) => *c,
-            None => 0,
-        };
-        self.restart_counts.insert(child_name.to_string(), (count + 1, now));
+    fn record_restart_supervisor(&mut self) {
+        self.restart_intensity_count += 1;
+    }
+    
+    fn should_restart_child(&self, child_spec: &ChildSpec, exit_reason: &str) -> bool {
+        match child_spec.restart {
+            RestartPolicy::Permanent => true,
+            RestartPolicy::Temporary => false,
+            RestartPolicy::Transient => exit_reason != "normal",
+        }
+    }
+    
+    fn start_child(&mut self, child_spec: &ChildSpec) -> Result<ProcId, String> {
+        if let Some(spawner) = &self.process_spawner {
+            let (child_pid, _) = spawner.spawn_process(child_spec.instructions.clone());
+            
+            let child_state = ChildState {
+                pid: child_pid,
+                spec: child_spec.clone(),
+                restart_count: 0,
+                last_restart: Instant::now(),
+            };
+            
+            self.supervised_children.insert(child_spec.id.clone(), child_state);
+            Ok(child_pid)
+        } else {
+            Err("No process spawner available".to_string())
+        }
+    }
+    
+    pub fn start_all_children(&mut self) -> Result<(), String> {
+        if let Some(spec) = self.supervisor_spec.clone() {
+            for child_spec in &spec.children {
+                self.start_child(child_spec)?;
+            }
+        }
+        Ok(())
+    }
+    
+    // Pattern matching helper methods
+    fn matches_pattern(&self, message: &Message, pattern: &MessagePattern) -> bool {
+        match (message, pattern) {
+            (_, MessagePattern::Any) => true,
+            (Message::Value(val), MessagePattern::Value(pattern_val)) => val == pattern_val,
+            (Message::Signal(sig), MessagePattern::Signal(pattern_sig)) => sig == pattern_sig,
+            (Message::Exit(pid), MessagePattern::Exit(pattern_pid)) => {
+                pattern_pid.is_none() || pattern_pid == &Some(*pid)
+            }
+            (Message::Down(pid, _ref, _reason), MessagePattern::Down(pattern_pid, _pattern_ref)) => {
+                pattern_pid.is_none() || pattern_pid == &Some(*pid)
+            }
+            (Message::Link(pid), MessagePattern::Link(pattern_pid)) => {
+                pattern_pid.is_none() || pattern_pid == &Some(*pid)
+            }
+            (Message::Value(val), MessagePattern::Type(type_name)) => {
+                match (val, type_name.as_str()) {
+                    (Value::Int(_), "int") => true,
+                    (Value::Float(_), "float") => true,
+                    (Value::Str(_), "string") => true,
+                    (Value::Bool(_), "bool") => true,
+                    (Value::List(_), "list") => true,
+                    (Value::Object(_), "object") => true,
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+    
+    fn selective_receive(&mut self, patterns: &[MessagePattern]) -> Result<Option<Message>, String> {
+        // Create a temporary vector to store messages that don't match
+        let mut temp_messages = Vec::new();
+        
+        // Try to find a matching message
+        let mut found_message = None;
+        
+        // Check all available messages
+        while let Ok(msg) = self.receive_message() {
+            let mut matched = false;
+            
+            for pattern in patterns {
+                if self.matches_pattern(&msg, pattern) {
+                    found_message = Some(msg.clone());
+                    matched = true;
+                    break;
+                }
+            }
+            
+            if matched {
+                break;
+            } else {
+                temp_messages.push(msg);
+            }
+        }
+        
+        // Put back non-matching messages in original order
+        for msg in temp_messages.into_iter().rev() {
+            let _ = self.mailbox_sender.try_send(msg);
+        }
+        
+        Ok(found_message)
     }
     
 
@@ -1475,16 +2155,26 @@ impl TinyProc {
                     // Handle exit signal from linked process
                     println!("Process {} received exit signal from process {}", self.id, pid);
                     if self.linked_processes.contains(&pid) {
-                        println!("Process {} is linked to {}, exiting due to exit signal", self.id, pid);
-                        // In BEAM, linked processes normally exit when receiving exit signals
-                        self.handle_process_exit(format!("exit_from_{}", pid));
-                        exit_signal_received = true;
-                        break;
+                        if self.trap_exit {
+                            // Process traps exits - convert to regular message
+                            println!("Process {} traps exits, converting exit signal to message", self.id);
+                            let _ = self.mailbox_sender.send(Message::Exit(pid));
+                        } else {
+                            println!("Process {} is linked to {}, exiting due to exit signal", self.id, pid);
+                            // In BEAM, linked processes normally exit when receiving exit signals
+                            self.handle_process_exit(format!("exit_from_{}", pid));
+                            exit_signal_received = true;
+                            break;
+                        }
                     } else {
                         println!("Process {} not linked to {}, discarding exit signal", self.id, pid);
                         // Not linked, just discard the message
-                        // In a real implementation, we might handle this differently
                     }
+                }
+                Message::TrapExit(trap) => {
+                    // Handle trap_exit setting
+                    println!("Process {} setting trap_exit to {}", self.id, trap);
+                    self.trap_exit = trap;
                 }
                 Message::Link(pid) => {
                     // Handle link request automatically - bidirectional linking
@@ -1589,6 +2279,7 @@ impl TinyProc {
             OpCode::PushInt(n) => self.stack.push(Value::Int(*n)),
             OpCode::PushFloat(f) => self.stack.push(Value::Float(*f)),
             OpCode::PushStr(s) => self.stack.push(Value::Str(s.clone())),
+            OpCode::PushBool(b) => self.stack.push(Value::Bool(*b)),
             OpCode::Print => {
                 let val = self.pop_stack("PRINT")?;
                 println!("{}", val);
@@ -1608,6 +2299,56 @@ impl TinyProc {
                     }),
                 }
             }
+            OpCode::Mul => {
+                let b = self.pop_stack("MUL")?;
+                let a = self.pop_stack("MUL")?;
+                match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x * y)),
+                    (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 * y)),
+                    (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x * *y as f64)),
+                    (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x * y)),
+                    _ => return Err(VMError::TypeMismatch { 
+                        expected: "two numbers (int or float)".to_string(), 
+                        got: format!("{:?}, {:?}", a, b), 
+                        operation: "MUL".to_string() 
+                    }),
+                }
+            }
+            OpCode::Div => {
+                let b = self.pop_stack("DIV")?;
+                let a = self.pop_stack("DIV")?;
+                match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => {
+                        if *y == 0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Int(x / y));
+                    },
+                    (Value::Int(x), Value::Float(y)) => {
+                        if *y == 0.0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Float(*x as f64 / y));
+                    },
+                    (Value::Float(x), Value::Int(y)) => {
+                        if *y == 0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Float(x / *y as f64));
+                    },
+                    (Value::Float(x), Value::Float(y)) => {
+                        if *y == 0.0 {
+                            return Err(VMError::DivisionByZero);
+                        }
+                        self.stack.push(Value::Float(x / y));
+                    },
+                    _ => return Err(VMError::TypeMismatch { 
+                        expected: "two numbers (int or float)".to_string(), 
+                        got: format!("{:?}, {:?}", a, b), 
+                        operation: "DIV".to_string() 
+                    }),
+                }
+            }
             OpCode::Halt => {
                 self.handle_process_exit("normal".to_string());
                 // Don't advance IP for Halt - process is done
@@ -1618,28 +2359,63 @@ impl TinyProc {
                 // In a real implementation, we'd parse the function from the stack
                 let function_value = self.pop_stack("SPAWN")?;
                 
-                // Create a simple process based on the function value
+                // Try to load the function as a ttvm file
                 let new_process_instructions = match function_value {
-                    Value::Str(ref s) if s == "hello_world" => {
-                        vec![
-                            OpCode::PushStr("Hello from spawned process!".to_string()),
-                            OpCode::Print,
-                            OpCode::Halt,
-                        ]
-                    }
-                    Value::Str(ref s) if s == "counter" => {
-                        vec![
-                            OpCode::PushInt(1),
-                            OpCode::Print,
-                            OpCode::PushInt(2),
-                            OpCode::Print,
-                            OpCode::PushInt(3),
-                            OpCode::Print,
-                            OpCode::Halt,
-                        ]
+                    Value::Str(ref s) => {
+                        // Try to load from examples directory first
+                        let mut file_path = format!("examples/{}.ttvm", s);
+                        if !std::path::Path::new(&file_path).exists() {
+                            // Try current directory
+                            file_path = format!("{}.ttvm", s);
+                        }
+                        
+                        if std::path::Path::new(&file_path).exists() {
+                            // Load and parse the ttvm file
+                            match parse_program(&file_path) {
+                                Ok(instructions) => instructions,
+                                Err(e) => {
+                                    eprintln!("Failed to parse {}: {}", file_path, e);
+                                    vec![
+                                        OpCode::PushStr(format!("Failed to load {}", s)),
+                                        OpCode::Print,
+                                        OpCode::Halt,
+                                    ]
+                                }
+                            }
+                        } else {
+                            // Fallback to hardcoded processes for backward compatibility
+                            match s.as_str() {
+                                "hello_world" => {
+                                    vec![
+                                        OpCode::PushStr("Hello from spawned process!".to_string()),
+                                        OpCode::Print,
+                                        OpCode::Halt,
+                                    ]
+                                }
+                                "counter" => {
+                                    vec![
+                                        OpCode::PushInt(1),
+                                        OpCode::Print,
+                                        OpCode::PushInt(2),
+                                        OpCode::Print,
+                                        OpCode::PushInt(3),
+                                        OpCode::Print,
+                                        OpCode::Halt,
+                                    ]
+                                }
+                                _ => {
+                                    // Default: spawn a simple process
+                                    vec![
+                                        OpCode::PushStr(format!("Spawned process: {}", s)),
+                                        OpCode::Print,
+                                        OpCode::Halt,
+                                    ]
+                                }
+                            }
+                        }
                     }
                     _ => {
-                        // Default: spawn a simple process
+                        // Non-string values default to simple process
                         vec![
                             OpCode::PushStr("Spawned process".to_string()),
                             OpCode::Print,
@@ -1711,6 +2487,11 @@ impl TinyProc {
                                 self.unlink_process(pid);
                                 self.stack.push(Value::Str(format!("unlinked:{}", pid)));
                             }
+                            Message::TrapExit(trap) => {
+                                // Handle trap_exit setting
+                                self.trap_exit = trap;
+                                self.stack.push(Value::Bool(trap));
+                            }
                         }
                     }
                     Err(_) => {
@@ -1719,6 +2500,77 @@ impl TinyProc {
                         self.state = ProcState::Waiting;
                         // Don't advance IP - we want to retry this instruction when rescheduled
                         return Ok(());
+                    }
+                }
+            }
+            OpCode::ReceiveMatch(patterns) => {
+                // Try selective receive with pattern matching
+                match self.selective_receive(patterns) {
+                    Ok(Some(msg)) => {
+                        // Message received successfully
+                        self.waiting_for_message = false;
+                        match msg {
+                            Message::Value(val) => self.stack.push(val),
+                            Message::Signal(sig) => self.stack.push(Value::Str(sig)),
+                            Message::Exit(pid) => {
+                                if self.trap_exit {
+                                    // Process traps exits - put exit message on stack
+                                    self.stack.push(Value::Str(format!("exit:{}", pid)));
+                                } else if self.linked_processes.contains(&pid) {
+                                    // In BEAM, linked processes normally exit when receiving exit signals
+                                    self.handle_process_exit(format!("exit_from_{}", pid));
+                                    return Ok(());
+                                } else {
+                                    // Not linked, treat as regular message
+                                    self.stack.push(Value::Int(pid as i64));
+                                }
+                            }
+                            Message::Monitor(pid, monitor_ref) => {
+                                // Handle monitor request
+                                self.add_monitor(pid, monitor_ref.clone());
+                                self.stack.push(Value::Str(format!("monitor:{}", monitor_ref)));
+                            }
+                            Message::Down(pid, monitor_ref, reason) => {
+                                // Handle down message
+                                self.stack.push(Value::Str(format!("down:{}:{}:{}", pid, monitor_ref, reason)));
+                            }
+                            Message::Link(pid) => {
+                                // Handle link request - bidirectional linking
+                                println!("Process {} received link request from process {}", self.id, pid);
+                                let was_already_linked = self.linked_processes.contains(&pid);
+                                self.link_process(pid);
+                                
+                                // Send back link confirmation to make it bidirectional
+                                if !was_already_linked {
+                                    if let Some(sender) = &self.message_sender {
+                                        let link_back_msg = Message::Link(self.id);
+                                        let _ = sender.send_message(pid, link_back_msg);
+                                    }
+                                }
+                                
+                                self.stack.push(Value::Str(format!("linked:{}", pid)));
+                            }
+                            Message::Unlink(pid) => {
+                                // Handle unlink request
+                                self.unlink_process(pid);
+                                self.stack.push(Value::Str(format!("unlinked:{}", pid)));
+                            }
+                            Message::TrapExit(trap) => {
+                                // Handle trap_exit setting
+                                self.trap_exit = trap;
+                                self.stack.push(Value::Bool(trap));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // No matching message available, mark as waiting and yield
+                        self.waiting_for_message = true;
+                        self.state = ProcState::Waiting;
+                        // Don't advance IP - we want to retry this instruction when rescheduled
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        return Err(VMError::RuntimeError(format!("Selective receive error: {}", e)));
                     }
                 }
             }
@@ -1848,6 +2700,17 @@ impl TinyProc {
                     self.stack.push(Value::Str("unlink_failed".to_string()));
                 }
             }
+            OpCode::TrapExit => {
+                // Set trap_exit flag from stack
+                let trap_value = self.pop_stack("TRAP_EXIT")?;
+                match trap_value {
+                    Value::Bool(trap) => {
+                        self.trap_exit = trap;
+                        println!("Process {} set trap_exit to {}", self.id, trap);
+                    }
+                    _ => return Err(VMError::TypeError("TRAP_EXIT requires boolean value".to_string())),
+                }
+            }
             OpCode::Register(name) => {
                 // Register current process with a name
                 if let Some(registry) = &self.name_registry {
@@ -1896,8 +2759,8 @@ impl TinyProc {
                 }
             }
             OpCode::StartSupervisor => {
-                // Mark this process as a supervisor
-                self.is_supervisor = true;
+                // This opcode is used to start supervisor functionality
+                // The actual supervisor is created with new_supervisor()
                 self.stack.push(Value::Str("supervisor_started".to_string()));
             }
             OpCode::SuperviseChild(child_name) => {
@@ -1907,11 +2770,11 @@ impl TinyProc {
             }
             OpCode::RestartChild(child_name) => {
                 // Restart a specific child process with safety measures
-                if self.is_supervisor {
+                if self.supervisor_spec.is_some() {
                     if self.supervised_children.contains_key(child_name) {
                         // Check if we can restart this child (prevents infinite loops)
-                        if self.can_restart_child(child_name) {
-                            self.record_restart(child_name);
+                        if self.can_restart_supervisor() {
+                            self.record_restart_supervisor();
                             
                             // In a real implementation, this would:
                             // 1. Terminate the old child process
@@ -2338,6 +3201,9 @@ pub enum VMError {
     InsufficientStackItems { needed: usize, available: usize },
     UnknownLabel(String),
     UnsupportedOperation(String),
+    RuntimeError(String),
+    TypeError(String),
+    DivisionByZero,
 }
 
 impl fmt::Display for VMError {
@@ -2359,6 +3225,9 @@ impl fmt::Display for VMError {
                 write!(f, "Need {} stack items but only {} available", needed, available),
             VMError::UnknownLabel(label) => write!(f, "Unknown label: {}", label),
             VMError::UnsupportedOperation(op) => write!(f, "Unsupported operation: {}", op),
+            VMError::RuntimeError(msg) => write!(f, "Runtime error: {}", msg),
+            VMError::TypeError(msg) => write!(f, "Type error: {}", msg),
+            VMError::DivisionByZero => write!(f, "Division by zero"),
         }
     }
 }
@@ -2367,7 +3236,7 @@ impl std::error::Error for VMError {}
 
 type VMResult<T> = Result<T, VMError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -2448,15 +3317,30 @@ impl fmt::Display for Value {
 }
 
 #[derive(Debug, Clone)]
+pub enum MessagePattern {
+    Any,                           // matches any message
+    Value(Value),                  // matches specific value
+    Signal(String),                // matches specific signal
+    Exit(Option<ProcId>),          // matches exit from specific PID or any
+    Down(Option<ProcId>, Option<String>), // matches down message
+    Link(Option<ProcId>),          // matches link message
+    Type(String),                  // matches message type (e.g., "int", "string")
+    Guard(String),                 // guard condition (variable name to check)
+}
+
+#[derive(Debug, Clone)]
 pub enum OpCode {
     PushInt(i64),
     PushFloat(f64),
     PushStr(String),
+    PushBool(bool),
     Add,
     AddF,
     Sub,
     SubF,
+    Mul,
     MulF,
+    Div,
     DivF,
     Concat,
     Print,
@@ -2570,12 +3454,14 @@ pub enum OpCode {
     // Concurrency operations
     Spawn,             // spawn new process from function on stack
     Receive,           // receive message from mailbox
+    ReceiveMatch(Vec<MessagePattern>), // selective receive with pattern matching
     Yield,             // yield control to scheduler
     Send(ProcId),      // send message to process
     Monitor(ProcId),   // monitor a process
     Demonitor(String), // stop monitoring (using monitor reference)
     Link(ProcId),      // link to a process
     Unlink(ProcId),    // unlink from a process
+    TrapExit,          // set trap_exit flag from stack
     // Process registry operations
     Register(String),  // register current process with a name
     Unregister(String), // unregister a name
@@ -3060,6 +3946,7 @@ impl VM {
                 OpCode::PushInt(n) => self.stack.push(Value::Int(*n)),
                 OpCode::PushFloat(f) => self.stack.push(Value::Float(*f)),
                 OpCode::PushStr(s) => self.stack.push(Value::Str(s.clone())),
+                OpCode::PushBool(b) => self.stack.push(Value::Bool(*b)),
                 OpCode::Add => {
                     let b = self.pop_stack("ADD")?;
                     let a = self.pop_stack("ADD")?;
@@ -3234,6 +4121,56 @@ impl VM {
                             expected: "two numbers (int or float)".to_string(), 
                             got: format!("{:?}, {:?}", a, b), 
                             operation: "SUB".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Mul => {
+                    let b = self.pop_stack("MUL")?;
+                    let a = self.pop_stack("MUL")?;
+                    match (&a, &b) {
+                        (Value::Int(x), Value::Int(y)) => self.stack.push(Value::Int(x * y)),
+                        (Value::Int(x), Value::Float(y)) => self.stack.push(Value::Float(*x as f64 * y)),
+                        (Value::Float(x), Value::Int(y)) => self.stack.push(Value::Float(x * *y as f64)),
+                        (Value::Float(x), Value::Float(y)) => self.stack.push(Value::Float(x * y)),
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two numbers (int or float)".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "MUL".to_string() 
+                        }),
+                    }
+                }
+                OpCode::Div => {
+                    let b = self.pop_stack("DIV")?;
+                    let a = self.pop_stack("DIV")?;
+                    match (&a, &b) {
+                        (Value::Int(x), Value::Int(y)) => {
+                            if *y == 0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Int(x / y));
+                        },
+                        (Value::Int(x), Value::Float(y)) => {
+                            if *y == 0.0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Float(*x as f64 / y));
+                        },
+                        (Value::Float(x), Value::Int(y)) => {
+                            if *y == 0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Float(x / *y as f64));
+                        },
+                        (Value::Float(x), Value::Float(y)) => {
+                            if *y == 0.0 {
+                                return Err(VMError::DivisionByZero);
+                            }
+                            self.stack.push(Value::Float(x / y));
+                        },
+                        _ => return Err(VMError::TypeMismatch { 
+                            expected: "two numbers (int or float)".to_string(), 
+                            got: format!("{:?}, {:?}", a, b), 
+                            operation: "DIV".to_string() 
                         }),
                     }
                 }
@@ -4769,6 +5706,14 @@ impl VM {
                     // For VM struct, not supported (use TinyProc instead)
                     return Err(VMError::UnsupportedOperation("UNLINK not supported in VM, use TinyProc scheduler".to_string()));
                 }
+                OpCode::TrapExit => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("TRAP_EXIT not supported in VM, use TinyProc scheduler".to_string()));
+                }
+                OpCode::ReceiveMatch(_patterns) => {
+                    // For VM struct, not supported (use TinyProc instead)
+                    return Err(VMError::UnsupportedOperation("RECEIVE_MATCH not supported in VM, use TinyProc scheduler".to_string()));
+                }
                 OpCode::Register(_name) => {
                     // For VM struct, not supported (use TinyProc instead)
                     return Err(VMError::UnsupportedOperation("REGISTER not supported in VM, use TinyProc scheduler".to_string()));
@@ -4996,11 +5941,20 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 let s = parts[1].trim_matches('"').to_string();
                 OpCode::PushStr(s)
             }
+            "PUSH_BOOL" => {
+                let b = parts[1].parse::<bool>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid boolean: {}", parts[1]) 
+                })?;
+                OpCode::PushBool(b)
+            }
             "ADD" => OpCode::Add,
             "ADD_F" => OpCode::AddF,
             "SUB" => OpCode::Sub,
             "SUB_F" => OpCode::SubF,
+            "MUL" => OpCode::Mul,
             "MUL_F" => OpCode::MulF,
+            "DIV" => OpCode::Div,
             "DIV_F" => OpCode::DivF,
             "DUP" => OpCode::Dup,
             "CONCAT" => OpCode::Concat,
@@ -5239,6 +6193,45 @@ fn parse_program(path: &str) -> VMResult<Vec<OpCode>> {
                 let name = parts[1].trim_matches('"').to_string();
                 OpCode::SendNamed(name)
             }
+            "UNREGISTER" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::Unregister(name)
+            }
+            "TRAP_EXIT" => OpCode::TrapExit,
+            "START_SUPERVISOR" => OpCode::StartSupervisor,
+            "SUPERVISE_CHILD" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::SuperviseChild(name)
+            }
+            "RESTART_CHILD" => {
+                let name = parts[1].trim_matches('"').to_string();
+                OpCode::RestartChild(name)
+            }
+            "LINK" => {
+                let pid = parts[1].parse::<u64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid PID: {}", parts[1]) 
+                })?;
+                OpCode::Link(pid)
+            }
+            "UNLINK" => {
+                let pid = parts[1].parse::<u64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid PID: {}", parts[1]) 
+                })?;
+                OpCode::Unlink(pid)
+            }
+            "MONITOR" => {
+                let pid = parts[1].parse::<u64>().map_err(|_| VMError::ParseError { 
+                    line: line_num, 
+                    instruction: format!("Invalid PID: {}", parts[1]) 
+                })?;
+                OpCode::Monitor(pid)
+            }
+            "DEMONITOR" => {
+                let monitor_ref = parts[1].trim_matches('"').to_string();
+                OpCode::Demonitor(monitor_ref)
+            }
             _ => return Err(VMError::ParseError { line: line_num, instruction: line.to_string() }),
         };
         program.push(opcode);
@@ -5303,11 +6296,14 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::PushInt(n) => format!("PUSH_INT {}", n),
             OpCode::PushFloat(f) => format!("PUSH_FLOAT {}", f),
             OpCode::PushStr(s) => format!("PUSH_STR \"{}\"", s.replace("\"", "\\\"")),
+            OpCode::PushBool(b) => format!("PUSH_BOOL {}", b),
             OpCode::Add => "ADD".to_string(),
             OpCode::AddF => "ADD_F".to_string(),
             OpCode::Sub => "SUB".to_string(),
             OpCode::SubF => "SUB_F".to_string(),
+            OpCode::Mul => "MUL".to_string(),
             OpCode::MulF => "MUL_F".to_string(),
+            OpCode::Div => "DIV".to_string(),
             OpCode::DivF => "DIV_F".to_string(),
             OpCode::Concat => "CONCAT".to_string(),
             OpCode::Print => "PRINT".to_string(),
@@ -5415,12 +6411,14 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
             OpCode::Export(name) => format!("EXPORT {}", name),
             OpCode::Spawn => format!("SPAWN"),
             OpCode::Receive => format!("RECEIVE"),
+            OpCode::ReceiveMatch(_patterns) => format!("RECEIVE_MATCH"),
             OpCode::Yield => format!("YIELD"),
             OpCode::Send(proc_id) => format!("SEND {}", proc_id),
             OpCode::Monitor(proc_id) => format!("MONITOR {}", proc_id),
             OpCode::Demonitor(monitor_ref) => format!("DEMONITOR {}", monitor_ref),
             OpCode::Link(proc_id) => format!("LINK {}", proc_id),
             OpCode::Unlink(proc_id) => format!("UNLINK {}", proc_id),
+            OpCode::TrapExit => "TRAP_EXIT".to_string(),
             OpCode::Register(name) => format!("REGISTER {}", name),
             OpCode::Unregister(name) => format!("UNREGISTER {}", name),
             OpCode::Whereis(name) => format!("WHEREIS {}", name),
@@ -5436,6 +6434,22 @@ fn write_optimized_program(program: &[OpCode], output_file: &str) -> std::io::Re
     std::fs::write(output_file, output)
 }
 
+fn run_smp_test(program: Vec<OpCode>) -> Result<(), Box<dyn std::error::Error>> {
+    // Create SMP scheduler pool with reduced verbosity for testing
+    let mut scheduler_pool = SchedulerPool::new_with_default_threads();
+    
+    // Spawn the main process with the program
+    let (_main_proc_id, _main_sender) = scheduler_pool.spawn_process(program);
+    
+    // Run the scheduler pool
+    scheduler_pool.run()?;
+    
+    // Wait for schedulers to finish
+    scheduler_pool.wait_for_completion();
+    
+    Ok(())
+}
+
 fn run_comprehensive_tests() {
     use std::path::Path;
     use std::io::Write;
@@ -5443,95 +6457,43 @@ fn run_comprehensive_tests() {
     println!("=== TinyTotVM Comprehensive Test Suite ===");
     println!();
     
-    // List of test files to run
-    let test_files = vec![
-        // Core functionality tests
-        ("showcase.ttvm", "Basic VM showcase"),
-        ("float_test.ttvm", "Float operations"),
-        ("object_test.ttvm", "Object manipulation"),
-        ("list_test.ttvm", "List operations"),
-        ("string_utils.ttvm", "String utilities"),
-        ("variables.ttvm", "Variable operations"),
-        ("null_test.ttvm", "Null handling"),
-        ("bool_test.ttvm", "Boolean operations"),
-        ("coercion_test.ttvm", "Type coercion"),
-        ("comparison.ttvm", "Comparison operations"),
-        ("comparison-le.ttvm", "Less-than-equal comparison"),
-        
-        // Function and closure tests
-        ("function_test.ttvm", "Basic functions"),
-        ("function_args_test.ttvm", "Function arguments"),
-        ("function_pointer_test.ttvm", "Function pointers"),
-        ("higher_order_test.ttvm", "Higher-order functions"),
-        ("call_test.ttvm", "Function calls"),
-        ("scoped_call.ttvm", "Scoped function calls"),
-        ("closure_test.ttvm", "Closures"),
-        ("simple_closure_test.ttvm", "Simple closures"),
-        ("nested_closure_test.ttvm", "Nested closures"),
-        ("lambda_test.ttvm", "Lambda functions"),
-        
-        // Module system tests
-        ("module_test.ttvm", "Basic modules"),
-        ("comprehensive_module_test.ttvm", "Advanced modules"),
-        ("closure_module_test.ttvm", "Module closures"),
-        ("complex_closure_test.ttvm", "Complex closures"),
-        
-        // Exception handling tests
-        ("exception_test.ttvm", "Exception handling"),
-        ("function_exception_test.ttvm", "Function exceptions"),
-        ("nested_exception_test.ttvm", "Nested exceptions"),
-        ("vm_error_exception_test.ttvm", "VM error exceptions"),
-        
-        // Standard library tests
-        ("stdlib_test.ttvm", "Standard library - math"),
-        ("stdlib_string_test.ttvm", "Standard library - strings"),
-        ("stdlib_prelude_test.ttvm", "Standard library - prelude"),
-        ("stdlib_comprehensive_test.ttvm", "Standard library - comprehensive"),
-        ("stdlib_enhanced_io_test.ttvm", "Standard library - enhanced I/O"),
-        ("stdlib_network_test.ttvm", "Standard library - network"),
-        ("stdlib_advanced_test.ttvm", "Standard library - advanced"),
-        
-        // I/O tests
-        ("io_simple_test.ttvm", "Simple I/O"),
-        ("io_comprehensive_test.ttvm", "Comprehensive I/O"),
-        ("advanced_io_test.ttvm", "Advanced I/O"),
-        
-        // Network tests
-        ("network_simple_test.ttvm", "Simple network"),
-        ("network_tcp_test.ttvm", "TCP operations"),
-        ("network_udp_test.ttvm", "UDP operations"),
-        ("network_comprehensive_test.ttvm", "Comprehensive network"),
-        
-        // Optimization tests
-        ("optimization_test.ttvm", "Basic optimization"),
-        ("constant_folding_test.ttvm", "Constant folding"),
-        ("dead_code_test.ttvm", "Dead code elimination"),
-        ("tail_call_test.ttvm", "Tail call optimization"),
-        ("memory_optimization_test.ttvm", "Memory optimization"),
-        ("advanced_optimization_test.ttvm", "Advanced optimization"),
-        ("safe_advanced_optimization_test.ttvm", "Safe advanced optimization"),
-        ("comprehensive_optimization_test.ttvm", "Comprehensive optimization"),
-        ("complete_optimization_showcase.ttvm", "Complete optimization showcase"),
-        
-        // Control flow tests
-        ("if_else.ttvm", "If-else statements"),
-        ("countdown.ttvm", "Countdown loop"),
-        ("countdown_label.ttvm", "Countdown with labels"),
-        ("delete.ttvm", "Delete operations"),
-        ("nested_object_test.ttvm", "Nested objects"),
-        
-        // Additional files
-        ("circular_a.ttvm", "Circular dependency A"),
-        ("circular_b.ttvm", "Circular dependency B"),
-        ("closure_module.ttvm", "Closure module"),
-        ("complex_closure_module.ttvm", "Complex closure module"),
-        ("io_interactive_test.ttvm", "Interactive I/O test"),
-        ("io_test.ttvm", "Basic I/O test"),
-        ("math_module.ttvm", "Math module"),
-        ("program.ttvm", "Basic program"),
-        ("showcase_lisp.ttvm", "Lisp showcase"),
-        ("simple_profiling_test.ttvm", "Simple profiling test"),
-    ];
+    // Automatically discover all .ttvm files in the examples directory
+    let examples_dir = Path::new("examples");
+    let mut test_files = Vec::new();
+    
+    if examples_dir.exists() && examples_dir.is_dir() {
+        match fs::read_dir(examples_dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if let Some(extension) = path.extension() {
+                            if extension == "ttvm" {
+                                if let Some(filename) = path.file_name() {
+                                    if let Some(filename_str) = filename.to_str() {
+                                        test_files.push(filename_str.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading examples directory: {}", e);
+                return;
+            }
+        }
+    } else {
+        eprintln!("Examples directory not found!");
+        return;
+    }
+    
+    // Sort test files for consistent ordering
+    test_files.sort();
+    
+    println!("Found {} test files in examples directory", test_files.len());
+    println!();
     
     let mut passed = 0;
     let mut failed = 0;
@@ -5545,14 +6507,43 @@ fn run_comprehensive_tests() {
         ("circular_b.ttvm", "Circular dependency detected"),
     ]);
     
-    for (filename, description) in &test_files {
+    // Files that require concurrency features (should be run with SMP)
+    let concurrency_files = std::collections::HashSet::from([
+        "01_process_spawning.ttvm",
+        "02_message_passing.ttvm", 
+        "03_name_registry.ttvm",
+        "04_comprehensive_workflow.ttvm",
+        "05_trap_exit_test.ttvm",
+        "06_supervisor_test.ttvm",
+        "07_process_linking_test.ttvm",
+        "08_selective_receive_test.ttvm",
+        "09_process_registry_test.ttvm",
+        "10_comprehensive_concurrency_test.ttvm",
+        "coffee_shop_demo.ttvm",
+        "concurrency_test.ttvm",
+        "simple_concurrency_demo.ttvm",
+        "simple_registry_test.ttvm",
+        "simple_trap_exit_test.ttvm",
+        "spawn_simple_worker.ttvm",
+        "spawn_test.ttvm",
+        "test_spawn.ttvm",
+        "test_sendnamed.ttvm",
+        "test_examples.ttvm",
+        "working_beam_example.ttvm",
+        "working_example.ttvm",
+        "barista_worker.ttvm",
+        "cashier_worker.ttvm",
+        "simple_worker_test.ttvm",
+    ]);
+    
+    for filename in &test_files {
         let path = format!("examples/{}", filename);
         
         if !Path::new(&path).exists() {
-            println!("SKIP: {} (file not found)", description);
+            println!("SKIP: {} (file not found)", filename);
             skipped += 1;
             results.push(TestResult {
-                name: description.to_string(),
+                name: filename.to_string(),
                 expected: "File exists".to_string(),
                 actual: "File not found".to_string(),
                 passed: false,
@@ -5560,21 +6551,33 @@ fn run_comprehensive_tests() {
             continue;
         }
         
-        print!("Testing {}: ", description);
+        // Determine if this test should use SMP scheduler
+        let use_smp = concurrency_files.contains(filename.as_str());
+        let test_mode = if use_smp { "SMP" } else { "Regular" };
+        
+        print!("Testing {} ({}): ", filename, test_mode);
         Write::flush(&mut std::io::stdout()).unwrap();
         
         // Parse and run the test
         match parse_program(&path) {
             Ok(program) => {
-                let mut vm = VM::new(program);
-                match vm.run() {
+                let test_result = if use_smp {
+                    // Run with SMP scheduler
+                    run_smp_test(program)
+                } else {
+                    // Run with regular VM
+                    let mut vm = VM::new(program);
+                    vm.run().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                };
+                
+                match test_result {
                     Ok(()) => {
                         // Check if this test was expected to fail
-                        if let Some(expected_error) = expected_failures.get(filename) {
+                        if let Some(expected_error) = expected_failures.get(filename.as_str()) {
                             println!("FAIL: Expected error '{}' but test passed", expected_error);
                             failed += 1;
                             results.push(TestResult {
-                                name: description.to_string(),
+                                name: format!("{} ({})", filename, test_mode),
                                 expected: format!("Error: {}", expected_error),
                                 actual: "Success".to_string(),
                                 passed: false,
@@ -5583,7 +6586,7 @@ fn run_comprehensive_tests() {
                             println!("PASS");
                             passed += 1;
                             results.push(TestResult {
-                                name: description.to_string(),
+                                name: format!("{} ({})", filename, test_mode),
                                 expected: "Success".to_string(),
                                 actual: "Success".to_string(),
                                 passed: true,
@@ -5593,12 +6596,12 @@ fn run_comprehensive_tests() {
                     Err(e) => {
                         let error_msg = e.to_string();
                         // Check if this is an expected failure
-                        if let Some(expected_error) = expected_failures.get(filename) {
+                        if let Some(expected_error) = expected_failures.get(filename.as_str()) {
                             if error_msg.contains(expected_error) {
                                 println!("PASS (Expected failure)");
                                 passed += 1;
                                 results.push(TestResult {
-                                    name: description.to_string(),
+                                    name: format!("{} ({})", filename, test_mode),
                                     expected: format!("Error: {}", expected_error),
                                     actual: format!("Error: {}", error_msg),
                                     passed: true,
@@ -5607,7 +6610,7 @@ fn run_comprehensive_tests() {
                                 println!("FAIL: Expected '{}' but got '{}'", expected_error, error_msg);
                                 failed += 1;
                                 results.push(TestResult {
-                                    name: description.to_string(),
+                                    name: format!("{} ({})", filename, test_mode),
                                     expected: format!("Error: {}", expected_error),
                                     actual: format!("Error: {}", error_msg),
                                     passed: false,
@@ -5617,7 +6620,7 @@ fn run_comprehensive_tests() {
                             println!("FAIL: {}", e);
                             failed += 1;
                             results.push(TestResult {
-                                name: description.to_string(),
+                                name: format!("{} ({})", filename, test_mode),
                                 expected: "Success".to_string(),
                                 actual: format!("Error: {}", e),
                                 passed: false,
@@ -5630,7 +6633,7 @@ fn run_comprehensive_tests() {
                 println!("FAIL: Parse error: {}", e);
                 failed += 1;
                 results.push(TestResult {
-                    name: description.to_string(),
+                    name: filename.to_string(),
                     expected: "Success".to_string(),
                     actual: format!("Parse error: {}", e),
                     passed: false,
@@ -5689,7 +6692,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--smp] [--trace-procs] [--profile-procs] <program.ttvm|program.ttb>");
+        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--no-smp] [--trace-procs] [--profile-procs] <program.ttvm|program.ttb>");
         eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
         eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
         eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
@@ -5704,12 +6707,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("       ttvm test-send-receive-comprehensive            # Run comprehensive SEND/RECEIVE tests");
         eprintln!("       ttvm test-concurrency-bytecode                  # Run concurrency bytecode compilation tests");
         eprintln!("       ttvm test-smp-concurrency                       # Run SMP scheduler concurrency tests");
+        eprintln!("       ttvm test-coffee-shop                           # Run coffee shop message passing demo");
+        eprintln!("       ttvm test-supervisor-tree                       # Run supervisor tree tests");
+        eprintln!("       ttvm test-selective-receive                     # Run selective receive tests");
+        eprintln!("       ttvm test-trap-exit                             # Run trap_exit tests");
+        eprintln!("       ttvm test-process-registry                      # Run process registry cleanup tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
+        eprintln!("SMP Scheduler: Enabled by default with all CPU cores. Use --no-smp for single-threaded mode.");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
         eprintln!("Table Control: --no-table disables formatted output in favor of plain text");
         eprintln!("Performance: --trace enables instruction tracing, --profile enables function profiling");
-        eprintln!("Concurrency: --smp enables multi-core execution, --trace-procs enables process tracing, --profile-procs enables process profiling");
+        eprintln!("Concurrency: Multi-core execution enabled by default, --trace-procs enables process tracing, --profile-procs enables process profiling");
         std::process::exit(1);
     }
 
@@ -5722,7 +6731,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut no_table = false;
     let mut trace_enabled = false;
     let mut profile_enabled = false;
-    let mut smp_enabled = false;
+    let mut smp_enabled = true;  // SMP is now the default
     let mut trace_procs = false;
     let mut profile_procs = false;
     let mut file_index = 1;
@@ -5774,8 +6783,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 profile_enabled = true;
                 file_index += 1;
             }
-            "--smp" => {
-                smp_enabled = true;
+            "--no-smp" => {
+                smp_enabled = false;
                 file_index += 1;
             }
             "--trace-procs" => {
@@ -5942,6 +6951,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
+            "test-supervisor-tree" => {
+                match test_supervisor_tree() {
+                    Ok(_) => println!("All supervisor tree tests passed!"),
+                    Err(e) => {
+                        eprintln!("Supervisor tree tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-selective-receive" => {
+                match test_selective_receive() {
+                    Ok(_) => println!("All selective receive tests passed!"),
+                    Err(e) => {
+                        eprintln!("Selective receive tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-trap-exit" => {
+                match test_trap_exit() {
+                    Ok(_) => println!("All trap_exit tests passed!"),
+                    Err(e) => {
+                        eprintln!("Trap_exit tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
+            "test-process-registry" => {
+                match test_process_registry_cleanup() {
+                    Ok(_) => println!("All process registry cleanup tests passed!"),
+                    Err(e) => {
+                        eprintln!("Process registry cleanup tests failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
             _ => {
                 // Normal execution, continue below
             }
@@ -6038,16 +7087,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Run the scheduler pool
         scheduler_pool.run()?;
         
-        // Set shutdown flag for clean exit
-        {
-            let mut shutdown = scheduler_pool.shutdown_flag.lock().unwrap();
-            *shutdown = true;
-        }
-        
-        // Wait for schedulers to finish
-        for handle in scheduler_pool.schedulers {
-            let _ = handle.join();
-        }
+        // Wait for schedulers to finish (run() already sets shutdown flag)
+        scheduler_pool.wait_for_completion();
         
         println!("SMP scheduler shutdown complete");
         

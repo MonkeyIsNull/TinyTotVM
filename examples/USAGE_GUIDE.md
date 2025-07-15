@@ -22,12 +22,15 @@ The SPAWN opcode currently supports these predefined process types:
 - Any other string: Creates default process
 
 #### Scheduler Requirements
-Concurrency features require the SMP scheduler:
+Concurrency features use the SMP scheduler (enabled by default):
 ```bash
-ttvm --smp your_program.ttvm
+ttvm your_program.ttvm
 ```
 
-The regular VM only supports basic operations and will error on concurrency opcodes.
+For single-threaded mode (disables concurrency):
+```bash
+ttvm --no-smp your_program.ttvm
+```
 
 #### Process ID Assignment
 - PID 1: Main process (first process)
@@ -112,14 +115,17 @@ TinyTotVM includes built-in tests for concurrency features:
 
 ### Example Execution
 ```bash
-# Run with SMP scheduler (required for concurrency)
-./target/release/ttvm --smp examples/working_example.ttvm
+# Run with SMP scheduler (enabled by default)
+./target/release/ttvm examples/working_example.ttvm
 
 # Run with debug output
-./target/release/ttvm --smp --debug examples/working_example.ttvm
+./target/release/ttvm --debug examples/working_example.ttvm
 
 # Run with process tracing
-./target/release/ttvm --smp --trace-procs examples/working_example.ttvm
+./target/release/ttvm --trace-procs examples/working_example.ttvm
+
+# Run in single-threaded mode (disables concurrency)
+./target/release/ttvm --no-smp examples/working_example.ttvm
 ```
 
 ## OpCode Reference
@@ -169,8 +175,8 @@ YIELD                    ; Give up CPU time to other processes
 
 ## Best Practices
 
-### 1. Always Use SMP Scheduler
-Concurrency features only work with `--smp` flag.
+### 1. SMP Scheduler (Default)
+Concurrency features use the SMP scheduler (enabled by default). Use `--no-smp` only for single-threaded mode.
 
 ### 2. Use YIELD Strategically
 Call YIELD after:
@@ -201,12 +207,13 @@ Processes must explicitly yield; no preemptive scheduling.
 ## Troubleshooting
 
 ### Program Hangs
-- Ensure you're using `--smp` flag
+- SMP scheduler is enabled by default
 - Add YIELD calls after spawning processes
 - Check that spawned processes eventually halt
 
 ### "Unsupported operation" Errors
-- Use `--smp` flag for concurrency features
+- Ensure SMP scheduler is enabled (default)
+- Use `--no-smp` only for single-threaded mode
 - Verify you're using supported OpCodes
 
 ### Messages Not Received
@@ -228,7 +235,7 @@ The current implementation provides a solid foundation for BEAM-style concurrenc
 
 When creating new examples or extending the system:
 
-1. Test with the SMP scheduler
+1. Test with the SMP scheduler (enabled by default)
 2. Use the built-in test commands
 3. Follow cooperative multitasking patterns
 4. Document any new process types or features

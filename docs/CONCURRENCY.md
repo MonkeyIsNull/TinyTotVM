@@ -4,9 +4,14 @@ TinyTotVM implements BEAM-style (Erlang/Elixir-inspired) actor model concurrency
 
 ## Quick Start
 
-**Enable SMP Scheduler** (Required for concurrency):
+**SMP Scheduler** (Enabled by default):
 ```bash
-ttvm --smp your_program.ttvm
+ttvm your_program.ttvm
+```
+
+**Single-threaded mode** (Disable SMP):
+```bash
+ttvm --no-smp your_program.ttvm
 ```
 
 **Basic Example**:
@@ -21,7 +26,7 @@ HALT
 ```
 
 ```bash
-ttvm --smp hello_concurrent.ttvm
+ttvm hello_concurrent.ttvm
 ```
 
 ## Core Concurrency Opcodes
@@ -222,13 +227,13 @@ SEND 1
 
 ## Best Practices
 
-### 1. Always Use SMP Scheduler
+### 1. SMP Scheduler (Default)
 ```bash
-# Correct - enables concurrency
-ttvm --smp program.ttvm
-
-# Wrong - concurrency opcodes will fail
+# Normal execution (SMP enabled by default)
 ttvm program.ttvm
+
+# Single-threaded mode (if needed)
+ttvm --no-smp program.ttvm
 ```
 
 ### 2. Use YIELD for Cooperation
@@ -266,7 +271,7 @@ Concurrency opcodes compile to bytecode:
 ttvm compile worker.ttvm worker.ttb
 
 # Run compiled version
-ttvm --smp worker.ttb
+ttvm worker.ttb
 ```
 
 **Bytecode mappings:**
@@ -279,9 +284,9 @@ ttvm --smp worker.ttb
 
 ## Performance Tips
 
-### SMP Benefits
-- Automatic CPU core detection
-- Work-stealing scheduler
+### SMP Benefits (Default)
+- Automatic CPU core detection and utilization
+- Work-stealing scheduler across all cores
 - True parallelism for CPU-intensive tasks
 
 ### Scheduling
@@ -363,6 +368,55 @@ PRINT
 
 HALT
 ```
+
+### Coffee Shop Actor Model Demo
+A comprehensive example showing multi-actor coordination:
+
+```assembly
+; coffee_shop_demo.ttvm - Full actor model workflow
+; Demonstrates Customer -> Cashier -> Barista communication
+
+REGISTER "customer"
+PUSH_STR "Customer registered"
+PRINT
+
+; Spawn cashier and barista
+PUSH_STR "cashier_worker"
+SPAWN
+PRINT
+
+PUSH_STR "barista_worker" 
+SPAWN
+PRINT
+
+; Order workflow with structured messages
+NEW_OBJECT
+PUSH_STR "order_type"
+PUSH_STR "order"
+OBJECT_SET
+
+PUSH_STR "drink"
+PUSH_STR "Latte"
+OBJECT_SET
+
+SEND 2              ; Send to cashier
+RECEIVE             ; Wait for confirmation
+PRINT
+
+; Continue workflow...
+HALT
+```
+
+**Run the demo:**
+```bash
+# Run as integrated test (recommended - completes without hanging)
+ttvm test-coffee-shop
+
+# File execution may hang due to SMP scheduler behavior
+# ttvm examples/coffee_shop_demo.ttvm
+```
+
+**Note**: The test version creates three separate processes (Customer, Cashier, Barista) that coordinate through message passing, demonstrating real BEAM-style actor patterns. The file version is provided for reference but may hang due to SMP scheduler limitations with SPAWN.
 
 ## Getting Help
 

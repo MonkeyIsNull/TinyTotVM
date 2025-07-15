@@ -1,0 +1,6 @@
+; Simple worker test
+PUSH_STR "Worker started"
+PRINT
+PUSH_STR "Worker about to halt"
+PRINT
+HALT
