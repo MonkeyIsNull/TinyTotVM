@@ -17,6 +17,7 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
+    #[allow(dead_code)]
     pub fn new(id: usize) -> Self {
         let local_queue = Worker::new_fifo();
         Scheduler {
@@ -27,6 +28,7 @@ impl Scheduler {
         }
     }
     
+    #[allow(dead_code)]
     pub fn add_process(&self, proc: Arc<Mutex<TinyProc>>) {
         self.local_queue.push(proc);
     }

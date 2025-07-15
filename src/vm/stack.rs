@@ -36,6 +36,7 @@ pub struct SafeStackOps<'a> {
 }
 
 impl<'a> SafeStackOps<'a> {
+    #[allow(dead_code)]
     pub fn new(stack: &'a mut Vec<Value>) -> Self {
         Self { stack }
     }

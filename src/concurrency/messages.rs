@@ -2,6 +2,7 @@ use std::time::Instant;
 use crate::vm::{Value, ProcId};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     Value(Value),
     Signal(String),

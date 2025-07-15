@@ -209,6 +209,7 @@ impl SchedulerPool {
         (proc_id, sender)
     }
     
+    #[allow(dead_code)]
     pub fn send_message(&self, target_proc_id: ProcId, message: Message) -> Result<(), String> {
         let mut registry = self.process_registry.lock().unwrap();
         registry.send_message_simple(target_proc_id, message)
@@ -325,21 +326,25 @@ impl SchedulerPool {
     }
     
     // Process name registry methods
+    #[allow(dead_code)]
     pub fn register_name(&self, name: String, proc_id: ProcId) -> Result<(), String> {
         let mut registry = self.process_registry.lock().unwrap();
         registry.register_name(name, proc_id)
     }
     
+    #[allow(dead_code)]
     pub fn unregister_name(&self, name: &str) -> Result<(), String> {
         let mut registry = self.process_registry.lock().unwrap();
         registry.unregister_name(name)
     }
     
+    #[allow(dead_code)]
     pub fn whereis(&self, name: &str) -> Option<ProcId> {
         let registry = self.process_registry.lock().unwrap();
         registry.whereis(name)
     }
     
+    #[allow(dead_code)]
     pub fn send_to_named(&self, name: &str, message: Message) -> Result<(), String> {
         let proc_id = self.whereis(name).ok_or_else(|| {
             format!("Process '{}' not found", name)
@@ -349,6 +354,7 @@ impl SchedulerPool {
     }
     
     // Clean up name registrations when process exits
+    #[allow(dead_code)]
     pub fn cleanup_process_names(&self, proc_id: ProcId) {
         let mut registry = self.process_registry.lock().unwrap();
         registry.unregister_process(proc_id).ok();

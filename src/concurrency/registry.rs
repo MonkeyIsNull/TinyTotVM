@@ -132,16 +132,19 @@ impl ProcessRegistry {
         self.send_message_simple(pid, message)
     }
     
+    #[allow(dead_code)]
     pub fn get_process_info(&self, pid: ProcId) -> Option<&ProcessInfo> {
         self.process_info.get(&pid)
     }
     
+    #[allow(dead_code)]
     pub fn update_process_state(&mut self, pid: ProcId, state: ProcState) {
         if let Some(info) = self.process_info.get_mut(&pid) {
             info.state = state;
         }
     }
     
+    #[allow(dead_code)]
     pub fn set_supervisor(&mut self, child_pid: ProcId, supervisor_pid: ProcId) {
         if let Some(info) = self.process_info.get_mut(&child_pid) {
             info.supervisor = Some(supervisor_pid);

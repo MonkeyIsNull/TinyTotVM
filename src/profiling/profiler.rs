@@ -84,6 +84,7 @@ impl Profiler {
         }
     }
 
+    #[allow(dead_code)]
     pub fn record_allocation(&mut self, size: usize) {
         self.total_allocations += 1;
         if size > self.peak_heap_size {

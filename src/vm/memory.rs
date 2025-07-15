@@ -25,12 +25,14 @@ pub struct VariableManager {
 }
 
 impl VariableManager {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             variables: vec![HashMap::new()], // global frame
         }
     }
     
+    #[allow(dead_code)]
     pub fn with_capacity(capacity: usize) -> Self {
         let mut variables = Vec::with_capacity(capacity);
         variables.push(HashMap::new()); // global frame
@@ -83,10 +85,12 @@ pub struct ExceptionHandler {
 }
 
 /// Call stack management
+#[allow(dead_code)]
 pub struct CallStack {
     pub stack: Vec<usize>, // return addresses for CALL/RET
 }
 
+#[allow(dead_code)]
 impl CallStack {
     pub fn new() -> Self {
         Self {

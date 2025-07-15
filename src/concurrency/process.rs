@@ -182,6 +182,7 @@ impl TinyProc {
         (proc, sender)
     }
     
+    #[allow(dead_code)]
     pub fn send_message(&self, message: Message) -> Result<(), crossbeam::channel::SendError<Message>> {
         self.mailbox_sender.send(message)
     }
@@ -190,6 +191,7 @@ impl TinyProc {
         self.mailbox.try_recv()
     }
     
+    #[allow(dead_code)]
     pub fn receive_message_blocking(&self) -> Result<Message, crossbeam::channel::RecvError> {
         self.mailbox.recv()
     }
@@ -220,6 +222,7 @@ impl TinyProc {
         self.monitored_by.insert(monitoring_pid, monitor_ref);
     }
     
+    #[allow(dead_code)]
     pub fn remove_monitor(&mut self, monitoring_pid: ProcId) -> Option<String> {
         self.monitored_by.remove(&monitoring_pid)
     }
@@ -308,6 +311,8 @@ impl TinyProc {
         self.restart_intensity_count += 1;
     }
     
+    
+    #[allow(dead_code)]
     fn should_restart_child(&self, child_spec: &ChildSpec, exit_reason: &str) -> bool {
         match child_spec.restart {
             RestartPolicy::Permanent => true,
@@ -535,10 +540,12 @@ impl TinyProc {
         self.stack.pop().ok_or_else(|| VMError::StackUnderflow(operation.to_string()))
     }
 
+    #[allow(dead_code)]
     fn peek_stack(&self, operation: &str) -> VMResult<&Value> {
         self.stack.last().ok_or_else(|| VMError::StackUnderflow(operation.to_string()))
     }
 
+    #[allow(dead_code)]
     fn check_stack_size(&self, needed: usize, _operation: &str) -> VMResult<()> {
         if self.stack.len() < needed {
             return Err(VMError::StackUnderflow(_operation.to_string()));

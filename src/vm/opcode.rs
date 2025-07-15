@@ -3,6 +3,7 @@ use crate::vm::value::Value;
 pub type ProcId = u64;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum MessagePattern {
     Any,                           // matches any message
     Value(Value),                  // matches specific value

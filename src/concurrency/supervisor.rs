@@ -3,6 +3,7 @@ use crate::vm::{OpCode, ProcId};
 
 // Supervision system enums and structs
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum RestartStrategy {
     OneForOne,     // Restart only the failed child
     OneForAll,     // Restart all children when one fails
@@ -10,12 +11,14 @@ pub enum RestartStrategy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum ChildType {
     Worker,
     Supervisor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum Shutdown {
     Brutal,           // Kill immediately
     Timeout(Duration), // Give time to shutdown gracefully
@@ -32,6 +35,7 @@ pub struct ChildSpec {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum RestartPolicy {
     Permanent,   // Always restart
     Temporary,   // Never restart
