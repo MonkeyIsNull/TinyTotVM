@@ -16,6 +16,8 @@ pub enum VMError {
     RuntimeError(String),
     TypeError(String),
     DivisionByZero,
+    CircularDependency(String),
+    InfiniteLoop,
 }
 
 impl fmt::Display for VMError {
@@ -40,6 +42,8 @@ impl fmt::Display for VMError {
             VMError::RuntimeError(msg) => write!(f, "Runtime error: {}", msg),
             VMError::TypeError(msg) => write!(f, "Type error: {}", msg),
             VMError::DivisionByZero => write!(f, "Division by zero"),
+            VMError::CircularDependency(path) => write!(f, "Circular dependency detected: {}", path),
+            VMError::InfiniteLoop => write!(f, "Infinite loop detected"),
         }
     }
 }

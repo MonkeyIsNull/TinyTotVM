@@ -19,7 +19,7 @@ pub trait StackOps {
 }
 
 /// Stack utility functions
-pub fn check_stack_items(available: usize, needed: usize, operation: &str) -> VMResult<()> {
+pub fn check_stack_items(available: usize, needed: usize, _operation: &str) -> VMResult<()> {
     if available < needed {
         Err(VMError::InsufficientStackItems { 
             needed, 

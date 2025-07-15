@@ -4,14 +4,10 @@ use std::time::Duration;
 use std::thread;
 use std::sync::{Arc, Mutex};
 use crossbeam::channel::Sender;
-use std::path::Path;
-use std::io::Write;
 use comfy_table::{Table, Cell, presets::UTF8_FULL, modifiers::UTF8_SOLID_INNER_BORDERS, Color, Attribute};
 use colored::*;
 
 use crate::vm::{VMError, VMResult, OpCode, ProcId, MessagePattern, VM};
-use crate::gc::GcStats;
-use crate::profiling::Profiler;
 use crate::concurrency::{Message, RestartStrategy, ChildType, Shutdown, ChildSpec, RestartPolicy, SupervisorSpec, TinyProc, ProcessSpawner, SchedulerPool};
 use crate::testing::{TestResult, run_vm_tests, report_gc_stats};
 use crate::cli::args::{CliArgs, CliCommand};

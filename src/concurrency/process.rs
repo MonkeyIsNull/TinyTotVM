@@ -1069,6 +1069,33 @@ impl TinyProc {
                     self.stack.push(Value::Str("not_supervisor".to_string()));
                 }
             }
+            OpCode::Import(path) => {
+                // Handle module imports with circular dependency detection
+                if self.loading_stack.contains(path) {
+                    return Err(VMError::CircularDependency(path.clone()));
+                }
+                
+                // If module is already loaded, skip
+                if self.loaded_modules.contains_key(path) {
+                    // Module already loaded, nothing to do
+                } else {
+                    // Load the module
+                    self.loading_stack.push(path.clone());
+                    
+                    // Load and parse the module file
+                    let module_result = self.load_module(path);
+                    
+                    // Remove from loading stack
+                    self.loading_stack.pop();
+                    
+                    match module_result {
+                        Ok(exports) => {
+                            self.loaded_modules.insert(path.clone(), exports);
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
             _ => {
                 // For now, just advance IP for unsupported instructions
                 // TODO: Implement full instruction set
@@ -1079,5 +1106,41 @@ impl TinyProc {
         
         self.ip += 1;
         Ok(())
+    }
+    
+    fn load_module(&mut self, path: &str) -> VMResult<HashMap<String, Value>> {
+        // Try to load the module file
+        let _content = std::fs::read_to_string(path)
+            .map_err(|e| VMError::FileError { 
+                filename: path.to_string(), 
+                error: e.to_string() 
+            })?;
+        
+        // Parse the module
+        let module_instructions = crate::bytecode::parse_program(path)
+            .map_err(|e| VMError::ParseError { 
+                line: 0, 
+                instruction: format!("Failed to parse module {}: {}", path, e) 
+            })?;
+        
+        // Create a new TinyProc to execute the module
+        let (mut module_proc, _sender) = TinyProc::new(9999, module_instructions);
+        
+        // Copy the current loading stack to detect circular dependencies
+        module_proc.loading_stack = self.loading_stack.clone();
+        
+        // Execute the module by running its instructions
+        while module_proc.ip < module_proc.instructions.len() {
+            let instruction = module_proc.instructions[module_proc.ip].clone();
+            module_proc.execute_instruction_safe(&instruction)?;
+            
+            // Check for potential infinite loops
+            if module_proc.instruction_count > 1000000 {
+                return Err(VMError::InfiniteLoop);
+            }
+        }
+        
+        // Return the module's exports
+        Ok(module_proc.exports)
     }
 }

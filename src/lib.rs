@@ -8,14 +8,14 @@ pub mod gc;
 pub mod profiling;
 pub mod concurrency;
 pub mod bytecode;
-pub mod testing;
+// pub mod testing;  // Temporarily disabled until VM is extracted
 
 // Re-export commonly used types for convenience
 pub use vm::{Value, OpCode, VMError, VMResult, ProcId, MessagePattern};
 pub use gc::{GcEngine, GcStats, MarkSweepGc, NoGc};
-pub use profiling::{Profiler, FunctionProfiler};
-pub use concurrency::{Message, OrderedMessage, RestartStrategy, ChildType, Shutdown, ChildSpec, RestartPolicy, SupervisorSpec, ChildState, ProcessRegistry, ProcessInfo};
-pub use testing::{TestResult, run_vm_tests, report_test_results, report_gc_stats};
+pub use profiling::Profiler;
+pub use concurrency::{Message, RestartStrategy, ChildType, Shutdown, ChildSpec, RestartPolicy, SupervisorSpec, ChildState, ProcessRegistry};
+// pub use testing::{TestResult, run_vm_tests, report_gc_stats};
 
 // Configuration types
 #[derive(Clone, Copy, Debug)]
