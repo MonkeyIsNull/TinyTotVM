@@ -21,7 +21,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 - **Debugging**: Step-by-step execution tracing, performance metrics, profiling support
 - **Performance**: Pre-allocated stacks, instruction counting, advanced optimization engine
 - **Pluggable GC**: Multiple garbage collection engines with runtime selection
-- **Testing**: 67 comprehensive tests with color-coded formatted output
+- **Testing**: 93 comprehensive tests with color-coded formatted output
 - **BEAM-Style Concurrency**: Actor model with process monitoring, linking, supervision trees, and named processes (SMP enabled by default)
 
 ## Quick Start
@@ -121,7 +121,7 @@ For detailed information, see:
 
 ## Example Programs
 
-The `examples/` directory contains 67 comprehensive test programs demonstrating all features:
+The `examples/` directory contains 93 comprehensive test programs demonstrating all features:
 
 - **`showcase.ttvm`** - Complete feature demonstration
 - **`simple_profiling_test.ttvm`** - Profiling and tracing demonstration
@@ -177,14 +177,55 @@ COMMANDS:
 
 ## Architecture
 
-TinyTotVM uses a clean, modular architecture:
+TinyTotVM uses a clean, modular architecture organized into logical modules:
 
-- **`main.rs`** - Core VM implementation and execution engine
-- **`compiler.rs`** - Assembly to bytecode compilation
-- **`optimizer.rs`** - Advanced 8-pass optimization engine
-- **`std/`** - Standard library modules
+### Core Modules
+- **`src/main.rs`** - Main entry point and CLI interface
+- **`src/lib.rs`** - Library interface and public API
+- **`src/bytecode.rs`** - Bytecode parsing and instruction decoding
+
+### Virtual Machine Core (`src/vm/`)
+- **`machine.rs`** - Main VM execution engine and runtime
+- **`value.rs`** - Dynamic value types and operations
+- **`opcode.rs`** - Instruction definitions and message patterns
+- **`stack.rs`** - Stack management and operations
+- **`memory.rs`** - Memory management and variable scoping
+- **`errors.rs`** - VM error types and handling
+
+### Concurrency System (`src/concurrency/`)
+- **`pool.rs`** - SMP scheduler pool and work-stealing
+- **`process.rs`** - Process isolation and actor model
+- **`scheduler.rs`** - Individual scheduler threads
+- **`registry.rs`** - Process registry and name resolution
+- **`supervisor.rs`** - Supervision trees and fault tolerance
+- **`messages.rs`** - Inter-process message types
+
+### Garbage Collection (`src/gc/`)
+- **`mark_sweep.rs`** - Mark-and-sweep garbage collector
+- **`no_gc.rs`** - No-op garbage collector for testing
+- **`stats.rs`** - GC performance statistics
+
+### Compilation and Optimization
+- **`src/compiler.rs`** - Assembly to bytecode compilation
+- **`src/lisp_compiler.rs`** - Lisp to TinyTotVM transpilation
+- **`src/optimizer.rs`** - Advanced 8-pass optimization engine
+
+### Profiling and Debugging (`src/profiling/`)
+- **`profiler.rs`** - Performance profiling and metrics
+- **`stats.rs`** - Profiling statistics and reporting
+
+### Testing Framework (`src/testing/`)
+- **`harness.rs`** - Test execution framework
+- **`runner.rs`** - Test runner and result reporting
+
+### Command Line Interface (`src/cli/`)
+- **`args.rs`** - Command line argument parsing
+- **`commands.rs`** - Command execution and dispatch
+
+### Supporting Files
+- **`std/`** - Standard library modules (math, string, I/O, network)
 - **`docs/`** - Comprehensive documentation
-- **`examples/`** - 67 test programs covering all features
+- **`examples/`** - 93 test programs covering all features
 
 ## License
 
