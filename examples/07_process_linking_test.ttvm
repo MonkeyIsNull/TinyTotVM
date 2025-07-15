@@ -1,0 +1,42 @@
+; Test process linking and monitoring
+; This test demonstrates process linking and monitoring
+
+PUSH_STR "=== Process Linking Test ==="
+PRINT
+
+; Register this process
+REGISTER "link_test_main"
+PUSH_STR "Registered as 'link_test_main'"
+PRINT
+
+; Spawn a process to link to
+PUSH_STR "Spawning process to link to..."
+PRINT  
+PUSH_STR "linkable_process"
+SPAWN
+STORE "target_pid"
+LOAD "target_pid"
+PRINT
+
+; Link to the spawned process
+PUSH_STR "Linking to spawned process..."
+PRINT
+LOAD "target_pid"
+LINK 0  ; This will be replaced with proper linking
+
+; Monitor the spawned process
+PUSH_STR "Monitoring spawned process..."
+PRINT
+LOAD "target_pid"
+MONITOR 0  ; This will be replaced with proper monitoring
+
+; Test unlinking
+PUSH_STR "Testing unlink..."
+PRINT
+LOAD "target_pid"
+UNLINK 0  ; This will be replaced with proper unlinking
+
+PUSH_STR "Process linking test completed"
+PRINT
+
+HALT

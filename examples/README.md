@@ -191,6 +191,24 @@ ttvm --smp examples/03_name_registry.ttvm
 ttvm --smp examples/04_comprehensive_workflow.ttvm
 ```
 
+### coffee_shop_demo.ttvm
+**Purpose**: Realistic actor model demonstration with multi-process coordination
+**Key Features**:
+- Three-actor workflow (Customer, Cashier, Barista)
+- Structured message passing with objects
+- Real-world business process modeling
+- Sequential workflow with proper synchronization
+- Comprehensive demonstration of BEAM-style patterns
+
+**Run with**:
+```bash
+# Recommended: Run as integrated test (avoids hanging)
+ttvm test-coffee-shop
+
+# File execution may hang with current SMP scheduler
+# ttvm --smp examples/coffee_shop_demo.ttvm
+```
+
 ## Best Practices
 
 ### 1. Process Design

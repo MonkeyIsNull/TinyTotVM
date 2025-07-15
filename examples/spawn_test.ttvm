@@ -1,0 +1,15 @@
+; Simple spawn test
+PUSH_STR "=== Spawn Test ==="
+PRINT
+
+PUSH_STR "About to spawn hello_world process"
+PRINT
+
+PUSH_STR "hello_world"
+SPAWN
+PRINT
+
+PUSH_STR "Spawned process, continuing..."
+PRINT
+
+HALT

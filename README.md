@@ -132,6 +132,7 @@ The `examples/` directory contains 67 comprehensive test programs demonstrating 
 - **`stdlib_comprehensive_test.ttvm`** - Complete standard library showcase
 - **`complete_optimization_showcase.ttvm`** - All 8 optimization passes
 - **`concurrency_test.ttvm`** - BEAM-style concurrency with YIELD instruction
+- **`coffee_shop_demo.ttvm`** - Multi-actor message passing demo (Customer/Cashier/Barista)
 
 ## Command Line Options
 
@@ -159,6 +160,7 @@ COMMANDS:
   ttvm test-send-receive-comprehensive    # Test SEND/RECEIVE message passing
   ttvm test-concurrency-bytecode         # Test bytecode compilation of concurrency
   ttvm test-smp-concurrency              # Test SMP scheduler with concurrency
+  ttvm test-coffee-shop                  # Test coffee shop actor model demo
   ttvm optimize <input> <output>          # Optimize and save program
   ttvm compile <input.ttvm> <output.ttb>  # Compile to bytecode
   ttvm compile-lisp <input.lisp> <output.ttvm>  # Transpile Lisp

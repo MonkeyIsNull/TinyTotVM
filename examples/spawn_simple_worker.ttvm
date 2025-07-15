@@ -1,0 +1,15 @@
+; Test spawning simple worker
+PUSH_STR "=== Spawn Simple Worker Test ==="
+PRINT
+
+PUSH_STR "About to spawn simple_worker_test"
+PRINT
+
+PUSH_STR "simple_worker_test"
+SPAWN
+PRINT
+
+PUSH_STR "Main process done"
+PRINT
+
+HALT

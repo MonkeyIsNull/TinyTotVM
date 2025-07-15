@@ -1,0 +1,44 @@
+; Test process registry functionality
+; This test demonstrates name registration and cleanup
+
+PUSH_STR "=== Process Registry Test ==="
+PRINT
+
+; Register this process with a name
+PUSH_STR "Registering process with name 'registry_test'..."
+PRINT
+REGISTER "registry_test"
+
+; Test whereis functionality
+PUSH_STR "Looking up process by name..."
+PRINT
+WHEREIS "registry_test"
+PRINT
+
+; Test sending to named process
+PUSH_STR "Sending message to named process..."
+PRINT
+PUSH_STR "Hello named process"
+SENDNAMED "registry_test"
+
+; Receive the message we sent to ourselves
+PUSH_STR "Receiving message..."
+PRINT
+RECEIVE
+PRINT
+
+; Test unregistering
+PUSH_STR "Unregistering process name..."
+PRINT
+UNREGISTER "registry_test"
+
+; Try to look up the unregistered name (should return 0)
+PUSH_STR "Looking up unregistered name..."
+PRINT
+WHEREIS "registry_test"
+PRINT
+
+PUSH_STR "Process registry test completed"
+PRINT
+
+HALT

@@ -1,0 +1,25 @@
+; Test supervisor functionality
+; This test demonstrates supervisor processes
+
+PUSH_STR "=== Supervisor Test ==="
+PRINT
+
+; Start supervisor functionality
+PUSH_STR "Starting supervisor..."
+PRINT
+START_SUPERVISOR
+
+; Supervise a child process
+PUSH_STR "Supervising child process..."
+PRINT
+SUPERVISE_CHILD "worker_child"
+
+; Test restarting a child
+PUSH_STR "Testing child restart..."
+PRINT
+RESTART_CHILD "worker_child"
+
+PUSH_STR "Supervisor test completed"
+PRINT
+
+HALT

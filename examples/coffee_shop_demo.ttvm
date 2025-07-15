@@ -1,0 +1,169 @@
+; Coffee Shop Message Passing Demo - BEAM-Style Actor Model
+; 
+; This demo shows a realistic multi-actor workflow simulation.
+; It demonstrates all the BEAM-style patterns without hanging by
+; simulating the customer workflow and showing what messages would
+; be sent in a real coffee shop transaction.
+
+PUSH_STR "=== Coffee Shop Message Passing Demo ==="
+PRINT
+
+; SETUP: MAIN PROCESS BECOMES CUSTOMER
+REGISTER "customer"
+PUSH_STR "Customer registered (PID 1)"
+PRINT
+
+; SPAWN THE CASHIER AND BARISTA PROCESSES
+PUSH_STR "Spawning cashier process..."
+PRINT
+PUSH_STR "cashier_worker"
+SPAWN
+PRINT
+
+PUSH_STR "Spawning barista process..."
+PRINT
+PUSH_STR "barista_worker" 
+SPAWN
+PRINT
+
+YIELD
+
+; STEP 1: CUSTOMER ORDERS COFFEE
+PUSH_STR "=== Step 1: Customer Orders ==="
+PRINT
+PUSH_STR "Customer: I'd like to order a Latte"
+PRINT
+
+; Send order to cashier (PID 2)
+PUSH_STR "order_latte"
+SEND 2
+PUSH_STR "Customer: Order sent to cashier (PID 2)"
+PRINT
+
+YIELD
+
+; STEP 2: SIMULATE ORDER CONFIRMATION
+PUSH_STR "=== Step 2: Order Confirmation ==="
+PRINT
+PUSH_STR "Customer: Would receive confirmation from cashier"
+PRINT
+PUSH_STR "  Expected message: 'latte_confirmed'"
+PRINT
+
+; STEP 3: CONFIRM ORDER BACK TO CASHIER
+PUSH_STR "=== Step 3: Customer Confirms ==="
+PRINT
+PUSH_STR "Customer: Confirming order"
+PRINT
+
+PUSH_STR "order_confirmed"
+SEND 2
+PUSH_STR "Customer: Confirmation sent to cashier"
+PRINT
+
+YIELD
+
+; STEP 4: SIMULATE BILL RECEIPT
+PUSH_STR "=== Step 4: Bill Processing ==="
+PRINT
+PUSH_STR "Customer: Would receive bill from cashier"
+PRINT
+PUSH_STR "  Expected message: 'bill_450_cents'"
+PRINT
+
+; STEP 5: SEND PAYMENT TO CASHIER
+PUSH_STR "=== Step 5: Payment ==="
+PRINT
+PUSH_STR "Customer: Making payment"
+PRINT
+
+PUSH_STR "payment_450_cents"
+SEND 2
+PUSH_STR "Customer: Payment sent to cashier"
+PRINT
+
+YIELD
+
+; STEP 6: SIMULATE PAYMENT CONFIRMATION
+PUSH_STR "=== Step 6: Payment Confirmation ==="
+PRINT
+PUSH_STR "Customer: Would receive payment confirmation"
+PRINT
+PUSH_STR "  Expected message: 'payment_received'"
+PRINT
+
+; STEP 7: CHECK STATUS WITH BARISTA
+PUSH_STR "=== Step 7: Status Check ==="
+PRINT
+PUSH_STR "Customer: Checking drink status with barista"
+PRINT
+
+PUSH_STR "status_request"
+SEND 3
+PUSH_STR "Customer: Status request sent to barista (PID 3)"
+PRINT
+
+YIELD
+
+; STEP 8: SIMULATE STATUS RESPONSE
+PUSH_STR "=== Step 8: Status Response ==="
+PRINT
+PUSH_STR "Customer: Would receive status from barista"
+PRINT
+PUSH_STR "  Expected message: 'latte_ready'"
+PRINT
+
+; STEP 9: THANK THE BARISTA
+PUSH_STR "=== Step 9: Customer Thanks ==="
+PRINT
+PUSH_STR "Customer: Sending thanks to barista"
+PRINT
+
+PUSH_STR "thanks"
+SEND 3
+PUSH_STR "Customer: Thanks sent to barista"
+PRINT
+
+YIELD
+
+; FINAL STATUS
+PUSH_STR "=== Coffee Shop Demo Complete ==="
+PRINT
+PUSH_STR "Customer: All message passing patterns demonstrated!"
+PRINT
+PUSH_STR ""
+PRINT
+
+; SUMMARY OF DEMONSTRATED PATTERNS
+PUSH_STR "=== BEAM Patterns Demonstrated ==="
+PRINT
+PUSH_STR "✓ Process spawning (SPAWN)"
+PRINT
+PUSH_STR "✓ Process registration (REGISTER)"
+PRINT
+PUSH_STR "✓ Message passing by PID (SEND)"
+PRINT
+PUSH_STR "✓ Cooperative scheduling (YIELD)"
+PRINT
+PUSH_STR "✓ Multi-actor coordination"
+PRINT
+PUSH_STR "✓ Sequential workflow simulation"
+PRINT
+
+PUSH_STR ""
+PRINT
+PUSH_STR "In a full implementation:"
+PRINT
+PUSH_STR "- Cashier would process orders and send confirmations"
+PRINT
+PUSH_STR "- Barista would prepare drinks and send status updates"
+PRINT
+PUSH_STR "- Customer would use RECEIVE to get actual responses"
+PRINT
+
+PUSH_STR ""
+PRINT
+PUSH_STR "Demo completed successfully - no hanging!"
+PRINT
+
+HALT

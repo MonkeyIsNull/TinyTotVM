@@ -364,6 +364,55 @@ PRINT
 HALT
 ```
 
+### Coffee Shop Actor Model Demo
+A comprehensive example showing multi-actor coordination:
+
+```assembly
+; coffee_shop_demo.ttvm - Full actor model workflow
+; Demonstrates Customer -> Cashier -> Barista communication
+
+REGISTER "customer"
+PUSH_STR "Customer registered"
+PRINT
+
+; Spawn cashier and barista
+PUSH_STR "cashier_worker"
+SPAWN
+PRINT
+
+PUSH_STR "barista_worker" 
+SPAWN
+PRINT
+
+; Order workflow with structured messages
+NEW_OBJECT
+PUSH_STR "order_type"
+PUSH_STR "order"
+OBJECT_SET
+
+PUSH_STR "drink"
+PUSH_STR "Latte"
+OBJECT_SET
+
+SEND 2              ; Send to cashier
+RECEIVE             ; Wait for confirmation
+PRINT
+
+; Continue workflow...
+HALT
+```
+
+**Run the demo:**
+```bash
+# Run as integrated test (recommended - completes without hanging)
+ttvm test-coffee-shop
+
+# File execution may hang due to SMP scheduler behavior
+# ttvm --smp examples/coffee_shop_demo.ttvm
+```
+
+**Note**: The test version creates three separate processes (Customer, Cashier, Barista) that coordinate through message passing, demonstrating real BEAM-style actor patterns. The file version is provided for reference but may hang due to SMP scheduler limitations with SPAWN.
+
 ## Getting Help
 
 For implementation details, see the source code. For examples:

@@ -1,0 +1,28 @@
+; Cashier worker process for coffee shop demo
+PUSH_STR "Cashier process started"
+PRINT
+REGISTER "cashier"
+PUSH_STR "Cashier registered"
+PRINT
+
+; Wait for and handle order
+RECEIVE
+PUSH_STR "Cashier: Received order - "
+PRINT
+PRINT
+
+; Wait for and handle confirmation
+RECEIVE
+PUSH_STR "Cashier: Order confirmed - "
+PRINT
+PRINT
+
+; Wait for and handle payment
+RECEIVE
+PUSH_STR "Cashier: Payment received - "
+PRINT
+PRINT
+
+PUSH_STR "Cashier: Transaction complete"
+PRINT
+HALT
