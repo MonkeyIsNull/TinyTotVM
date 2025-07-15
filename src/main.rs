@@ -467,6 +467,11 @@ impl Scheduler {
         
         let mut proc = proc_arc.lock().unwrap();
         
+        // Show debug info about which core is processing which process (only on first execution)
+        if matches!(proc.state, ProcState::Ready) && !proc.waiting_for_message {
+            println!("Core {}: Starting execution of process {}", self.id, proc_id);
+        }
+        
         match proc.state {
             ProcState::Ready | ProcState::Waiting => {
                 // If process is waiting for a message, check if it has one now
@@ -639,10 +644,10 @@ impl SchedulerPool {
     }
     
     pub fn new_with_default_threads() -> Self {
-        // Use fewer threads to reduce lock contention during testing
-        let num_threads = 2; // std::thread::available_parallelism()
-            // .map(|n| n.get())
-            // .unwrap_or(4); // fallback to 4 threads
+        // Use all available CPU cores for optimal performance
+        let num_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4); // fallback to 4 threads if detection fails
         println!("Creating scheduler pool with {} threads (CPU cores)", num_threads);
         Self::new_with_threads(num_threads)
     }
@@ -6687,7 +6692,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--smp] [--trace-procs] [--profile-procs] <program.ttvm|program.ttb>");
+        eprintln!("Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--no-smp] [--trace-procs] [--profile-procs] <program.ttvm|program.ttb>");
         eprintln!("       ttvm compile <input.ttvm> <output.ttb>");
         eprintln!("       ttvm compile-lisp <input.lisp> <output.ttvm>");
         eprintln!("       ttvm optimize <input.ttvm> <output.ttvm>");
@@ -6709,10 +6714,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("       ttvm test-process-registry                      # Run process registry cleanup tests");
         eprintln!("");
         eprintln!("GC Types: mark-sweep (default), no-gc");
+        eprintln!("SMP Scheduler: Enabled by default with all CPU cores. Use --no-smp for single-threaded mode.");
         eprintln!("Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables");
         eprintln!("Table Control: --no-table disables formatted output in favor of plain text");
         eprintln!("Performance: --trace enables instruction tracing, --profile enables function profiling");
-        eprintln!("Concurrency: --smp enables multi-core execution, --trace-procs enables process tracing, --profile-procs enables process profiling");
+        eprintln!("Concurrency: Multi-core execution enabled by default, --trace-procs enables process tracing, --profile-procs enables process profiling");
         std::process::exit(1);
     }
 
@@ -6725,7 +6731,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut no_table = false;
     let mut trace_enabled = false;
     let mut profile_enabled = false;
-    let mut smp_enabled = false;
+    let mut smp_enabled = true;  // SMP is now the default
     let mut trace_procs = false;
     let mut profile_procs = false;
     let mut file_index = 1;
@@ -6777,8 +6783,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 profile_enabled = true;
                 file_index += 1;
             }
-            "--smp" => {
-                smp_enabled = true;
+            "--no-smp" => {
+                smp_enabled = false;
                 file_index += 1;
             }
             "--trace-procs" => {

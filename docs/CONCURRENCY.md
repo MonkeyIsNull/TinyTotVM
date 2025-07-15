@@ -4,9 +4,14 @@ TinyTotVM implements BEAM-style (Erlang/Elixir-inspired) actor model concurrency
 
 ## Quick Start
 
-**Enable SMP Scheduler** (Required for concurrency):
+**SMP Scheduler** (Enabled by default):
 ```bash
-ttvm --smp your_program.ttvm
+ttvm your_program.ttvm
+```
+
+**Single-threaded mode** (Disable SMP):
+```bash
+ttvm --no-smp your_program.ttvm
 ```
 
 **Basic Example**:
@@ -21,7 +26,7 @@ HALT
 ```
 
 ```bash
-ttvm --smp hello_concurrent.ttvm
+ttvm hello_concurrent.ttvm
 ```
 
 ## Core Concurrency Opcodes
@@ -222,13 +227,13 @@ SEND 1
 
 ## Best Practices
 
-### 1. Always Use SMP Scheduler
+### 1. SMP Scheduler (Default)
 ```bash
-# Correct - enables concurrency
-ttvm --smp program.ttvm
-
-# Wrong - concurrency opcodes will fail
+# Normal execution (SMP enabled by default)
 ttvm program.ttvm
+
+# Single-threaded mode (if needed)
+ttvm --no-smp program.ttvm
 ```
 
 ### 2. Use YIELD for Cooperation
@@ -266,7 +271,7 @@ Concurrency opcodes compile to bytecode:
 ttvm compile worker.ttvm worker.ttb
 
 # Run compiled version
-ttvm --smp worker.ttb
+ttvm worker.ttb
 ```
 
 **Bytecode mappings:**
@@ -279,9 +284,9 @@ ttvm --smp worker.ttb
 
 ## Performance Tips
 
-### SMP Benefits
-- Automatic CPU core detection
-- Work-stealing scheduler
+### SMP Benefits (Default)
+- Automatic CPU core detection and utilization
+- Work-stealing scheduler across all cores
 - True parallelism for CPU-intensive tasks
 
 ### Scheduling
@@ -408,7 +413,7 @@ HALT
 ttvm test-coffee-shop
 
 # File execution may hang due to SMP scheduler behavior
-# ttvm --smp examples/coffee_shop_demo.ttvm
+# ttvm examples/coffee_shop_demo.ttvm
 ```
 
 **Note**: The test version creates three separate processes (Customer, Cashier, Barista) that coordinate through message passing, demonstrating real BEAM-style actor patterns. The file version is provided for reference but may hang due to SMP scheduler limitations with SPAWN.

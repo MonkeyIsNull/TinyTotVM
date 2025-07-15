@@ -22,7 +22,7 @@ TinyTotVM provides a **complete functional programming runtime** with advanced c
 - **Performance**: Pre-allocated stacks, instruction counting, advanced optimization engine
 - **Pluggable GC**: Multiple garbage collection engines with runtime selection
 - **Testing**: 67 comprehensive tests with color-coded formatted output
-- **BEAM-Style Concurrency**: Actor model with process monitoring, linking, supervision trees, and named processes
+- **BEAM-Style Concurrency**: Actor model with process monitoring, linking, supervision trees, and named processes (SMP enabled by default)
 
 ## Quick Start
 
@@ -50,8 +50,8 @@ ttvm --profile --trace examples/simple_profiling_test.ttvm
 # With garbage collection options
 ttvm --gc mark-sweep --gc-stats examples/showcase.ttvm
 
-# With BEAM-style concurrency (SMP scheduler)
-ttvm --smp examples/showcase.ttvm
+# With single-threaded mode (disable SMP)
+ttvm --no-smp examples/showcase.ttvm
 ```
 
 ### Profiling and Tracing
@@ -149,7 +149,7 @@ OPTIONS:
   --profile            Enable function performance profiling
   --run-tests          Run built-in unit tests
   --no-table           Use plain text output instead of formatted tables
-  --smp                Enable BEAM-style concurrency with SMP scheduler
+  --no-smp             Disable SMP scheduler (use single-threaded mode)
 
 COMMANDS:
   ttvm test-all                           # Run all example tests
