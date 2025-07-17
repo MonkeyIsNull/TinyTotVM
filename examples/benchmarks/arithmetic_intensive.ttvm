@@ -1,0 +1,41 @@
+; Arithmetic-intensive benchmark
+; Tests numerical computation performance
+
+PUSH_INT 0
+STORE_VAR "sum"
+
+PUSH_INT 0
+STORE_VAR "i"
+
+; Loop from 0 to 1000
+LOAD_VAR "i"
+PUSH_INT 1000
+LT
+JZ_ADDR 50
+
+; Inner computation: sum += i * i + i
+LOAD_VAR "sum"
+LOAD_VAR "i"
+LOAD_VAR "i"
+MUL
+LOAD_VAR "i"
+ADD
+ADD
+STORE_VAR "sum"
+
+; Increment i
+LOAD_VAR "i"
+PUSH_INT 1
+ADD
+STORE_VAR "i"
+
+; Jump back to loop condition
+JMP_ADDR 8
+
+; Print final result
+PUSH_STR "Arithmetic result: "
+PRINT
+LOAD_VAR "sum"
+PRINT
+
+HALT

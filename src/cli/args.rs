@@ -41,6 +41,8 @@ pub enum CliCommand {
     TestSelectiveReceive,
     TestTrapExit,
     TestProcessRegistry,
+    BenchmarkPerformance,
+    BenchmarkIrVsStack,
 }
 
 impl CliArgs {
@@ -179,6 +181,8 @@ impl CliArgs {
                 "test-selective-receive" => CliCommand::TestSelectiveReceive,
                 "test-trap-exit" => CliCommand::TestTrapExit,
                 "test-process-registry" => CliCommand::TestProcessRegistry,
+                "benchmark-performance" => CliCommand::BenchmarkPerformance,
+                "benchmark-ir-vs-stack" => CliCommand::BenchmarkIrVsStack,
                 _ => {
                     // Assume it's a file to run
                     CliCommand::Run { file: args[file_index].clone() }
@@ -255,6 +259,8 @@ impl CliArgs {
              \x20      ttvm test-selective-receive                     # Run selective receive tests\n\
              \x20      ttvm test-trap-exit                             # Run trap_exit tests\n\
              \x20      ttvm test-process-registry                      # Run process registry cleanup tests\n\
+             \x20      ttvm benchmark-performance                      # Run comprehensive performance benchmarks\n\
+             \x20      ttvm benchmark-ir-vs-stack                      # Compare IR vs Stack execution performance\n\
              \n\
              GC Types: mark-sweep (default), no-gc\n\
              SMP Scheduler: Enabled by default with all CPU cores. Use --no-smp for single-threaded mode.\n\

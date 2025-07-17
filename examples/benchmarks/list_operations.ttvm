@@ -1,0 +1,75 @@
+; List operations benchmark
+; Tests list creation, indexing, and manipulation
+
+; Create an empty list
+NEW_LIST
+STORE_VAR "numbers"
+
+PUSH_INT 0
+STORE_VAR "i"
+
+; Fill list with numbers 0-99
+LOAD_VAR "i"
+PUSH_INT 100
+LT
+JZ_ADDR 30
+
+; Add number to list
+LOAD_VAR "numbers"
+LOAD_VAR "i"
+LIST_APPEND
+STORE_VAR "numbers"
+
+; Increment counter
+LOAD_VAR "i"
+PUSH_INT 1
+ADD
+STORE_VAR "i"
+
+; Jump back to loop
+JMP_ADDR 8
+
+; Now sum all elements in the list
+PUSH_INT 0
+STORE_VAR "sum"
+
+PUSH_INT 0
+STORE_VAR "j"
+
+; Sum loop
+LOAD_VAR "j"
+LOAD_VAR "numbers"
+LEN
+LT
+JZ_ADDR 70
+
+; Add list[j] to sum
+LOAD_VAR "sum"
+LOAD_VAR "numbers"
+LOAD_VAR "j"
+INDEX
+ADD
+STORE_VAR "sum"
+
+; Increment j
+LOAD_VAR "j"
+PUSH_INT 1
+ADD
+STORE_VAR "j"
+
+; Jump back to sum loop
+JMP_ADDR 45
+
+; Print results
+PUSH_STR "List length: "
+PRINT
+LOAD_VAR "numbers"
+LEN
+PRINT
+
+PUSH_STR "Sum: "
+PRINT
+LOAD_VAR "sum"
+PRINT
+
+HALT

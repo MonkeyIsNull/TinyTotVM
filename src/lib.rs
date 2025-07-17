@@ -9,6 +9,7 @@ pub mod profiling;
 pub mod concurrency;
 pub mod bytecode;
 pub mod ir;
+pub mod benchmarks;
 // pub mod testing;  // Temporarily disabled until VM is extracted
 
 // Re-export commonly used types for convenience
@@ -17,6 +18,7 @@ pub use gc::{GcEngine, GcStats, MarkSweepGc, NoGc};
 pub use profiling::Profiler;
 pub use concurrency::{Message, RestartStrategy, ChildType, Shutdown, ChildSpec, RestartPolicy, SupervisorSpec, ChildState, ProcessRegistry};
 pub use ir::{RegInstr, RegValue, RegBlock, RegId};
+pub use benchmarks::{PerformanceComparison, BenchmarkResult, BenchmarkSuite};
 // pub use testing::{TestResult, run_vm_tests, report_gc_stats};
 
 // Configuration types

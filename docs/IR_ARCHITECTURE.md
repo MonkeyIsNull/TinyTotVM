@@ -4,7 +4,7 @@ TinyTotVM includes an experimental register-based execution mode that translates
 
 ## Overview
 
-The IR system answers the fundamental question: **"Can concurrency operations be compiled to register form?"** - The answer is **YES**. The IR system successfully translates all TinyTotVM operations, including complex concurrency primitives, to register-based instructions.
+The IR system was built to translate all TinyTotVM operations, including complex concurrency primitives, to register-based instructions.
 
 ## Key Components
 
@@ -212,7 +212,7 @@ The IR system provides a foundation for:
 
 ## Implementation Status
 
-### ✅ Completed Features
+### Completed Features
 - **Full IR Translation**: All TinyTotVM operations translate to register form
 - **Register Allocation**: Efficient virtual register management
 - **Virtual Stack**: Complete stack simulation using registers
@@ -274,6 +274,5 @@ ttvm --use-ir any_program.ttvm
 
 ## Conclusion
 
-The IR system definitively proves that **concurrency operations can be compiled to register form**. While the current implementation uses hybrid execution for practical concurrency support, the successful IR translation demonstrates the feasibility of fully register-based concurrent execution.
-
+While the current implementation uses hybrid execution for practical concurrency support, the successful IR translation demonstrates the feasibility of fully register-based concurrent execution.
 This foundation enables future research into register-based actor models, optimized message passing, and high-performance concurrent virtual machines.

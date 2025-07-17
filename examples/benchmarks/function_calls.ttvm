@@ -1,0 +1,56 @@
+; Function call benchmark
+; Tests function call overhead and recursion
+
+; Define recursive factorial function at address 20
+JMP_ADDR 40
+
+; Factorial function starts at address 20
+; Parameter 'n' should be on stack
+LOAD "n"
+PUSH_INT 1
+LE
+JZ_ADDR 30
+
+; Base case: return 1
+PUSH_INT 1
+RET
+
+; Recursive case: n * factorial(n-1)
+LOAD "n"
+LOAD "n"
+PUSH_INT 1
+SUB
+STORE "n"
+CALL_ADDR 20
+MUL
+RET
+
+; Main program starts here
+PUSH_INT 0
+STORE_VAR "i"
+
+; Loop to call factorial multiple times
+LOAD_VAR "i"
+PUSH_INT 10
+LT
+JZ_ADDR 70
+
+; Call factorial(10)
+PUSH_INT 10
+STORE "n"
+CALL_ADDR 20
+PRINT
+
+; Increment counter
+LOAD_VAR "i"
+PUSH_INT 1
+ADD
+STORE_VAR "i"
+
+; Jump back to loop
+JMP_ADDR 50
+
+PUSH_STR "Function call benchmark completed"
+PRINT
+
+HALT

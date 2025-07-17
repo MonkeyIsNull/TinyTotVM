@@ -137,17 +137,17 @@ PRINT
 ; SUMMARY OF DEMONSTRATED PATTERNS
 PUSH_STR "=== BEAM Patterns Demonstrated ==="
 PRINT
-PUSH_STR "✓ Process spawning (SPAWN)"
+PUSH_STR "- Process spawning (SPAWN)"
 PRINT
-PUSH_STR "✓ Process registration (REGISTER)"
+PUSH_STR "- Process registration (REGISTER)"
 PRINT
-PUSH_STR "✓ Message passing by PID (SEND)"
+PUSH_STR "- Message passing by PID (SEND)"
 PRINT
-PUSH_STR "✓ Cooperative scheduling (YIELD)"
+PUSH_STR "- Cooperative scheduling (YIELD)"
 PRINT
-PUSH_STR "✓ Multi-actor coordination"
+PUSH_STR "- Multi-actor coordination"
 PRINT
-PUSH_STR "✓ Sequential workflow simulation"
+PUSH_STR "- Sequential workflow simulation"
 PRINT
 
 PUSH_STR ""
