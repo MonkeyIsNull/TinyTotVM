@@ -1,0 +1,43 @@
+; String processing benchmark
+; Tests string manipulation performance
+
+PUSH_STR ""
+STORE_VAR "result"
+
+PUSH_INT 0
+STORE_VAR "i"
+
+; Loop to build a large string
+LOAD_VAR "i"
+PUSH_INT 100
+LT
+JZ_ADDR 30
+
+; Concatenate strings
+LOAD_VAR "result"
+PUSH_STR "Item_"
+CONCAT
+
+LOAD_VAR "i"
+PUSH_STR "_data "
+CONCAT
+CONCAT
+STORE_VAR "result"
+
+; Increment counter
+LOAD_VAR "i"
+PUSH_INT 1
+ADD
+STORE_VAR "i"
+
+; Jump back to loop
+JMP_ADDR 8
+
+; Print result length
+PUSH_STR "String length: "
+PRINT
+LOAD_VAR "result"
+LEN
+PRINT
+
+HALT

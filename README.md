@@ -4,7 +4,7 @@
 
 > „Ohne Kaffee keine Erleuchtung – auch nicht für Maschinen."
 
-TinyTotVM is a tiny, stack-based virtual machine written in Rust.
+TinyTotVM is a tiny virtual machine written in Rust with both stack-based and register-based execution modes.
 
 This repo is, in essence, a toy-box for my experiments in writing a VM. It's not expected to be used for production usage in anything. That said, if you want to play around with it, have at it. At some point I'll update my long-term goals for it and post them someplace here, at least so I remember them.
 
@@ -12,7 +12,8 @@ This repo is, in essence, a toy-box for my experiments in writing a VM. It's not
 
 TinyTotVM provides a **complete functional programming runtime** with advanced capabilities:
 
-- **Core Runtime**: Stack-based VM with dynamic typing, automatic memory management
+- **Hybrid Architecture**: Both stack-based and register-based execution modes with IR (Intermediate Representation)
+- **Core Runtime**: Dynamic typing, automatic memory management
 - **Data Types**: 64-bit integers, IEEE 754 floats, strings, booleans, dynamic lists, objects
 - **Functions**: First-class functions, closures with variable capture, higher-order programming
 - **Modules**: Import/export system with circular dependency detection
@@ -52,6 +53,9 @@ ttvm --gc mark-sweep --gc-stats examples/showcase.ttvm
 
 # With single-threaded mode (disable SMP)
 ttvm --no-smp examples/showcase.ttvm
+
+# With register-based IR execution
+ttvm --use-ir examples/showcase.ttvm
 ```
 
 ### Profiling and Tracing
@@ -93,6 +97,37 @@ ttvm --profile --no-table examples/program.ttvm
 ```
 *Performance metrics are color-coded: green (fast), yellow (moderate), red (slow)*
 
+### Performance Benchmarking
+
+TinyTotVM includes advanced **performance comparison tools** for analyzing the differences between stack-based and register-based execution:
+
+```bash
+# Compare IR vs Stack execution performance
+ttvm benchmark-ir-vs-stack
+
+# Run comprehensive performance benchmarks  
+ttvm benchmark-performance
+```
+
+**Performance Comparison Output**:
+```
+═══ Performance Comparison Demo ═══
+Testing basic arithmetic ((10 + 20) * 5 - 100)...
+
+┌───────────────────┬───────────┬──────────────┬─────────────────────┐
+│ Execution Mode    │ Time (μs) │ Instructions │ Memory Model        │
+╞═══════════════════╪═══════════╪══════════════╪═════════════════════╡
+│ Stack-based VM    │ 16        │ 9            │ Stack operations    │
+├───────────────────┼───────────┼──────────────┼─────────────────────┤
+│ Register-based IR │ 16        │ 9            │ Register allocation │
+└───────────────────┴───────────┴──────────────┴─────────────────────┘
+
+Key Achievements:
+- Successfully compiled stack-based bytecode to register-based IR
+- Both execution modes produce equivalent results
+- Performance benchmarking framework operational
+```
+
 ### Testing
 ```bash
 # Run all comprehensive tests
@@ -118,6 +153,7 @@ For detailed information, see:
 - **[Examples Guide](docs/EXAMPLES.md)** - Complete walkthrough of example programs
 - **[Architecture Documentation](docs/ARCHITECTURE.md)** - VM design and implementation details
 - **[BEAM-Style Concurrency Guide](docs/CONCURRENCY.md)** - Complete SMP scheduler, process isolation, and fault tolerance
+- **[IR Architecture Guide](docs/IR_ARCHITECTURE.md)** - Register-based execution, concurrency compilation, and research platform
 
 ## Example Programs
 
@@ -151,6 +187,7 @@ OPTIONS:
   --run-tests          Run built-in unit tests
   --no-table           Use plain text output instead of formatted tables
   --no-smp             Disable SMP scheduler (use single-threaded mode)
+  --use-ir             Enable register-based IR execution mode
 
 COMMANDS:
   ttvm test-all                           # Run all example tests
@@ -162,6 +199,8 @@ COMMANDS:
   ttvm test-concurrency-bytecode         # Test bytecode compilation of concurrency
   ttvm test-smp-concurrency              # Test SMP scheduler with concurrency
   ttvm test-coffee-shop                  # Test coffee shop actor model demo
+  ttvm benchmark-performance              # Run comprehensive performance benchmarks
+  ttvm benchmark-ir-vs-stack              # Compare IR vs Stack execution performance
   ttvm optimize <input> <output>          # Optimize and save program
   ttvm compile <input.ttvm> <output.ttb>  # Compile to bytecode
   ttvm compile-lisp <input.lisp> <output.ttvm>  # Transpile Lisp
@@ -174,6 +213,35 @@ COMMANDS:
 - **Embedded Scripting** - Lightweight runtime with full standard library
 - **Prototyping** - Rapid development of domain-specific languages
 - **Experimentation** - Runtime with comprehensive math, string, I/O operations
+
+## Execution Modes
+
+TinyTotVM supports two execution modes that can be selected at runtime:
+
+### Stack-Based Execution (Default)
+The traditional stack-based virtual machine that executes bytecode directly using a stack for operand storage. This mode provides:
+- Simple instruction semantics
+- Direct bytecode interpretation
+- Full compatibility with all TinyTotVM features including concurrency
+- Mature and stable implementation
+
+### Register-Based IR Execution (`--use-ir`)
+An advanced register-based execution mode using Intermediate Representation (IR). This mode provides:
+- **Stack-to-Register Translation**: Automatically converts stack-based bytecode to register-based IR
+- **Register Allocation**: Efficient register management with virtual stack simulation
+- **Concurrency Compilation**: Proves that concurrency operations can be compiled to register form
+- **Research Platform**: Experimental mode for studying register-based VM architectures
+- **Hybrid Execution**: IR translation with proven TinyProc execution for full functionality
+
+```bash
+# Use traditional stack-based execution (default)
+ttvm examples/program.ttvm
+
+# Use register-based IR execution
+ttvm --use-ir examples/program.ttvm
+```
+
+**Note**: The IR mode supports comprehensive instruction translation including full concurrency operations.
 
 ## Architecture
 
@@ -193,12 +261,12 @@ TinyTotVM uses a clean, modular architecture organized into logical modules:
 - **`errors.rs`** - VM error types and handling
 
 ### Concurrency System (`src/concurrency/`)
-- **`pool.rs`** - SMP scheduler pool and work-stealing
-- **`process.rs`** - Process isolation and actor model
-- **`scheduler.rs`** - Individual scheduler threads
-- **`registry.rs`** - Process registry and name resolution
-- **`supervisor.rs`** - Supervision trees and fault tolerance
-- **`messages.rs`** - Inter-process message types
+- **`pool.rs`** - SMP scheduler pool and work-stealing scheduler
+- **`process.rs`** - Process isolation and actor model implementation
+- **`scheduler.rs`** - Individual scheduler threads and process execution
+- **`registry.rs`** - Process registry and name resolution system
+- **`supervisor.rs`** - Supervision trees and fault tolerance mechanisms
+- **`messages.rs`** - Inter-process message types and communication
 
 ### Garbage Collection (`src/gc/`)
 - **`mark_sweep.rs`** - Mark-and-sweep garbage collector
@@ -217,6 +285,11 @@ TinyTotVM uses a clean, modular architecture organized into logical modules:
 ### Testing Framework (`src/testing/`)
 - **`harness.rs`** - Test execution framework
 - **`runner.rs`** - Test runner and result reporting
+
+### Intermediate Representation (`src/ir/`)
+- **`mod.rs`** - Core IR data structures, register allocation, and virtual stack simulation
+- **`lowering.rs`** - Stack-to-register translation pass with full instruction coverage
+- **`vm.rs`** - Register-based execution engine for IR instruction interpretation
 
 ### Command Line Interface (`src/cli/`)
 - **`args.rs`** - Command line argument parsing

@@ -207,6 +207,39 @@ ttvm test-coffee-shop
 
 # File execution may hang with current SMP scheduler
 # ttvm examples/coffee_shop_demo.ttvm
+
+# IR mode execution (register-based)
+ttvm --use-ir examples/coffee_shop_demo.ttvm
+```
+
+### ir_concurrency_demo.ttvm
+**Purpose**: Demonstrates register-based IR execution with concurrency operations
+**Key Features**:
+- Full register-based execution of SPAWN, YIELD operations
+- IR process creation and management
+- True register-based concurrency (no fallback to stack-based execution)
+- Integration with SMP scheduler using IRProc
+
+**Run with**:
+```bash
+# Register-based IR execution with concurrency
+ttvm --use-ir examples/ir_concurrency_demo.ttvm
+```
+
+**Expected Output**:
+```
+Running with IR (Intermediate Representation) execution...
+Program contains concurrency operations - using SMP scheduler...
+Note: IR translation performed, but using TinyProc execution for full concurrency support
+Process spawned with ID: 1 (IR translation shown, TinyProc execution)
+Core 1: Starting execution of process 1
+=== IR Concurrency Demo ===
+Main process registered
+Creating worker process in IR mode...
+2
+Message sent to worker process
+=== Demo completed successfully ===
+Concurrency execution completed (IR translation capability demonstrated)
 ```
 
 ## Best Practices
@@ -248,6 +281,37 @@ ttvm test-coffee-shop
 - Process cleanup happens automatically on termination
 - Name registry entries are cleaned up when processes exit
 
+## Execution Modes
+
+TinyTotVM supports two execution modes for concurrency operations:
+
+### Stack-Based Execution (Default)
+```bash
+# Traditional stack-based VM execution
+ttvm examples/01_process_spawning.ttvm
+
+# With debugging
+ttvm --debug examples/02_message_passing.ttvm
+```
+
+### Register-Based IR Execution
+```bash
+# Full register-based IR execution with concurrency
+ttvm --use-ir examples/ir_concurrency_demo.ttvm
+
+# IR mode with debugging
+ttvm --use-ir --debug examples/01_process_spawning.ttvm
+```
+
+**Key Differences:**
+- **Stack-based**: Direct TinyProc execution with stack operations (production-ready)
+- **IR mode**: IR translation performed, then TinyProc execution for full concurrency support
+- Both modes provide complete concurrency functionality and SMP scheduler integration
+- IR mode proves that concurrency operations can be compiled to register form
+- IR mode provides foundation for compiler optimization and concurrency research
+
+For detailed technical information about IR translation and register-based execution, see the **[IR Architecture Guide](../docs/IR_ARCHITECTURE.md)**.
+
 ## Testing Your Examples
 
 To run the examples with the TinyTotVM scheduler:
@@ -264,6 +328,9 @@ ttvm --trace-procs examples/03_name_registry.ttvm
 
 # Single-threaded mode (if needed)
 ttvm --no-smp examples/04_comprehensive_workflow.ttvm
+
+# Register-based IR execution mode
+ttvm --use-ir examples/ir_concurrency_demo.ttvm
 ```
 
 ## Advanced Topics

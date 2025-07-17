@@ -249,3 +249,31 @@ CALL my_function x y
 LABEL end_loop
 LABEL my_function
 ```
+
+## Register-Based IR Instructions
+
+When using the experimental `--use-ir` flag, TinyTotVM translates stack-based bytecode to register-based intermediate representation with the following instruction set:
+
+### Core IR Operations
+```
+MOV r1, #5              ; Move immediate value to register
+MOV r2, r1              ; Move register to register
+ADD r3, r1, r2          ; r3 = r1 + r2
+SUB r3, r1, r2          ; r3 = r1 - r2
+MUL r3, r1, r2          ; r3 = r1 * r2
+DIV r3, r1, r2          ; r3 = r1 / r2
+```
+
+### Control Flow
+```
+JMP 100                 ; Unconditional jump to instruction 100
+JZ r1, 200             ; Jump to instruction 200 if r1 is zero
+```
+
+### I/O Operations
+```
+PRINT r1               ; Print value in register r1
+HALT                   ; Terminate execution
+```
+
+**Note**: The IR mode provides comprehensive instruction translation with automatic fallback to the SMP scheduler for concurrency operations, ensuring full compatibility with all TinyTotVM features.

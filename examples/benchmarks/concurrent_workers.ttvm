@@ -1,0 +1,65 @@
+; Concurrent workers benchmark
+; Tests concurrency overhead and message passing
+
+REGISTER "coordinator"
+PUSH_STR "Coordinator started"
+PRINT
+
+; Spawn 5 worker processes
+PUSH_INT 0
+STORE_VAR "worker_count"
+
+; Worker spawning loop
+LOAD_VAR "worker_count"
+PUSH_INT 5
+LT
+JZ_ADDR 35
+
+; Spawn a worker
+PUSH_STR "counter"
+SPAWN
+PRINT
+
+; Send work to worker
+PUSH_STR "WORK_TASK"
+SEND 2  ; Send to worker (approximate PID)
+
+; Increment worker count
+LOAD_VAR "worker_count"
+PUSH_INT 1
+ADD
+STORE_VAR "worker_count"
+
+; Jump back to spawning loop
+JMP_ADDR 12
+
+; Yield to let workers run
+YIELD
+
+; Collect results from workers
+PUSH_INT 0
+STORE_VAR "results_collected"
+
+; Results collection loop
+LOAD_VAR "results_collected"
+PUSH_INT 5
+LT
+JZ_ADDR 70
+
+; Wait for a result
+RECEIVE
+PRINT
+
+; Increment results counter
+LOAD_VAR "results_collected"
+PUSH_INT 1
+ADD
+STORE_VAR "results_collected"
+
+; Jump back to collection loop
+JMP_ADDR 50
+
+PUSH_STR "All workers completed"
+PRINT
+
+HALT

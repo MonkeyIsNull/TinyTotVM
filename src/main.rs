@@ -8,6 +8,7 @@ mod profiling;
 mod concurrency;
 mod testing;
 mod cli;
+mod ir;
 
 // Re-export commonly used types from lib.rs for internal use
 use tiny_tot_vm::{VMConfig, OutputMode, ProcState};

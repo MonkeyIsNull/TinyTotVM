@@ -15,6 +15,7 @@ pub struct CliArgs {
     pub smp_enabled: bool,
     pub trace_procs: bool,
     pub profile_procs: bool,
+    pub use_ir: bool,
     pub command: CliCommand,
 }
 
@@ -40,6 +41,8 @@ pub enum CliCommand {
     TestSelectiveReceive,
     TestTrapExit,
     TestProcessRegistry,
+    BenchmarkPerformance,
+    BenchmarkIrVsStack,
 }
 
 impl CliArgs {
@@ -62,6 +65,7 @@ impl CliArgs {
         let mut smp_enabled = true;  // SMP is now the default
         let mut trace_procs = false;
         let mut profile_procs = false;
+        let mut use_ir = false;
         let mut file_index = 1;
 
         // Parse flags
@@ -121,6 +125,10 @@ impl CliArgs {
                     profile_procs = true;
                     file_index += 1;
                 }
+                "--use-ir" => {
+                    use_ir = true;
+                    file_index += 1;
+                }
                 _ => {
                     return Err(format!("Unknown flag: {}", args[file_index]));
                 }
@@ -173,6 +181,8 @@ impl CliArgs {
                 "test-selective-receive" => CliCommand::TestSelectiveReceive,
                 "test-trap-exit" => CliCommand::TestTrapExit,
                 "test-process-registry" => CliCommand::TestProcessRegistry,
+                "benchmark-performance" => CliCommand::BenchmarkPerformance,
+                "benchmark-ir-vs-stack" => CliCommand::BenchmarkIrVsStack,
                 _ => {
                     // Assume it's a file to run
                     CliCommand::Run { file: args[file_index].clone() }
@@ -198,6 +208,7 @@ impl CliArgs {
             smp_enabled,
             trace_procs,
             profile_procs,
+            use_ir,
             command,
         })
     }
@@ -222,12 +233,13 @@ impl CliArgs {
             smp_enabled: self.smp_enabled,
             trace_procs: self.trace_procs,
             profile_procs: self.profile_procs,
+            use_ir: self.use_ir,
         }
     }
 
     fn usage_string() -> String {
         format!(
-            "Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--no-smp] [--trace-procs] [--profile-procs] <program.ttvm|program.ttb>\n\
+            "Usage: ttvm [--debug] [--optimize] [--gc <type>] [--gc-debug] [--gc-stats] [--run-tests] [--no-table] [--trace] [--profile] [--no-smp] [--trace-procs] [--profile-procs] [--use-ir] <program.ttvm|program.ttb>\n\
              \x20      ttvm compile <input.ttvm> <output.ttb>\n\
              \x20      ttvm compile-lisp <input.lisp> <output.ttvm>\n\
              \x20      ttvm optimize <input.ttvm> <output.ttvm>\n\
@@ -247,13 +259,16 @@ impl CliArgs {
              \x20      ttvm test-selective-receive                     # Run selective receive tests\n\
              \x20      ttvm test-trap-exit                             # Run trap_exit tests\n\
              \x20      ttvm test-process-registry                      # Run process registry cleanup tests\n\
+             \x20      ttvm benchmark-performance                      # Run comprehensive performance benchmarks\n\
+             \x20      ttvm benchmark-ir-vs-stack                      # Compare IR vs Stack execution performance\n\
              \n\
              GC Types: mark-sweep (default), no-gc\n\
              SMP Scheduler: Enabled by default with all CPU cores. Use --no-smp for single-threaded mode.\n\
              Debug Output: --run-tests enables unit test tables, --gc-debug enables GC debug tables\n\
              Table Control: --no-table disables formatted output in favor of plain text\n\
              Performance: --trace enables instruction tracing, --profile enables function profiling\n\
-             Concurrency: Multi-core execution enabled by default, --trace-procs enables process tracing, --profile-procs enables process profiling"
+             Concurrency: Multi-core execution enabled by default, --trace-procs enables process tracing, --profile-procs enables process profiling\n\
+             Execution Modes: --use-ir enables experimental register-based IR execution (basic programs only)"
         )
     }
 }

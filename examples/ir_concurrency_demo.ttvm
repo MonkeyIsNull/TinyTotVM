@@ -1,0 +1,44 @@
+; IR Concurrency Demo - Demonstrates register-based concurrency execution
+; Run with: ttvm --use-ir examples/ir_concurrency_demo.ttvm
+
+PUSH_STR "=== IR Concurrency Demo ==="
+PRINT
+
+; Register main process with name
+REGISTER "main_process"
+PUSH_STR "Main process registered"
+PRINT
+
+; Spawn a worker process in IR mode
+PUSH_STR "Creating worker process in IR mode..."
+PRINT
+
+PUSH_STR "hello_world"
+SPAWN
+PRINT  ; Print the new process PID
+
+; Send a message to the spawned process
+PUSH_STR "Hello from main IR process!"
+SEND 2  ; Send to process ID 2 (first spawned process)
+
+PUSH_STR "Message sent to worker process"
+PRINT
+
+; Yield to allow worker process to run
+YIELD
+
+; Send another message using SENDNAMED
+PUSH_STR "Second message from main"
+SENDNAMED "worker_process"
+
+PUSH_STR "Second message sent"
+PRINT
+
+; Continue main process
+PUSH_STR "Main process continuing after yield"
+PRINT
+
+PUSH_STR "=== Demo completed successfully ==="
+PRINT
+
+HALT

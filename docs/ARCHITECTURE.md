@@ -38,6 +38,10 @@ src/
 ├── testing/                   # Test framework
 │   ├── harness.rs             # Test execution
 │   └── runner.rs              # Test runner
+├── ir/                        # Intermediate Representation
+│   ├── mod.rs                 # Core IR structures
+│   ├── lowering.rs            # Stack-to-register translation
+│   └── vm.rs                  # Register-based execution
 └── cli/                       # Command line interface
     ├── args.rs                # Argument parsing
     └── commands.rs            # Command dispatch
@@ -551,6 +555,85 @@ EXPORT custom_function
 - **Combined Optimizations**: Up to 46% overall improvement
 - **Memory Access**: Reduced redundant operations
 
+## Intermediate Representation (IR) System
+
+TinyTotVM includes an experimental register-based execution mode that translates stack-based bytecode to register-based intermediate representation.
+
+### IR Architecture Overview
+```rust
+// Core IR data structures
+pub enum RegInstr {
+    Mov(RegId, RegValue),           // Move value to register
+    Add(RegId, RegId, RegId),       // dst = src1 + src2
+    Sub(RegId, RegId, RegId),       // dst = src1 - src2
+    Jmp(usize),                     // Unconditional jump
+    Jz(RegId, usize),              // Jump if register is zero
+    Print(RegId),                   // Print register value
+    Halt,                           // Stop execution
+}
+
+pub enum RegValue {
+    Const(Value),                   // Immediate constant
+    Reg(RegId),                     // Register reference
+}
+
+pub struct RegBlock {
+    instructions: Vec<RegInstr>,
+    register_count: u32,
+    entry: usize,
+}
+```
+
+### Stack-to-Register Translation
+The lowering pass converts stack-based operations to register-based operations:
+
+```rust
+// Stack-based: PUSH_INT 5; PUSH_INT 3; ADD
+// Becomes register-based:
+Mov(r0, Const(Value::Int(5)))      // r0 = 5
+Mov(r1, Const(Value::Int(3)))      // r1 = 3  
+Add(r2, r0, r1)                    // r2 = r0 + r1
+```
+
+### Translation Process
+1. **First Pass**: Build address mapping from bytecode to IR instructions
+2. **Second Pass**: Translate each bytecode instruction to equivalent IR
+3. **Stack Simulation**: Maintain virtual stack state using register allocation
+4. **Register Allocation**: Allocate registers for intermediate values
+
+### Register-Based Execution Engine
+```rust
+pub struct RegisterVM {
+    registers: Vec<Value>,          // Register file
+    variables: HashMap<String, Value>, // Named variables
+    ip: usize,                      // Instruction pointer
+    block: RegBlock,                // IR program
+    halted: bool,                   // Execution state
+}
+```
+
+### IR Benefits
+- **Research Platform**: Experimental register-based execution
+- **Performance Potential**: Register operations can be more efficient
+- **Educational Value**: Demonstrates register allocation and IR translation
+- **Architecture Comparison**: Direct comparison between stack and register execution
+
+### Current Implementation Status
+- **Basic Operations**: Full support for arithmetic, logic, comparisons
+- **Variable Operations**: Complete STORE, LOAD, DELETE support
+- **Control Flow**: Jump and conditional operations (with some edge cases being refined)
+- **Concurrency Integration**: Automatic delegation to SMP scheduler for SPAWN, SEND, RECEIVE operations
+- **Future Work**: Direct IR execution of concurrency operations, function calls, exception handling
+
+### Usage
+```bash
+# Enable IR execution mode
+ttvm --use-ir examples/program.ttvm
+
+# Compare with traditional stack execution
+ttvm --no-smp examples/program.ttvm
+```
+
 ## Design Principles
 
 1. **Simplicity** - Clean, understandable code structure
@@ -560,3 +643,4 @@ EXPORT custom_function
 5. **Extensibility** - Easy to add features and instructions
 6. **Educational Value** - Clear demonstration of VM concepts
 7. **Cross-Platform** - Pure Rust, runs anywhere
+8. **Hybrid Architecture** - Support both stack and register execution modes

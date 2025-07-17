@@ -1,0 +1,28 @@
+; Simple loop benchmark
+; Basic iteration performance test
+
+PUSH_INT 0
+STORE_VAR "counter"
+
+; Simple counting loop
+LOAD_VAR "counter"
+PUSH_INT 10000
+LT
+JZ_ADDR 20
+
+; Increment counter
+LOAD_VAR "counter"
+PUSH_INT 1
+ADD
+STORE_VAR "counter"
+
+; Jump back to loop
+JMP_ADDR 5
+
+; Print final count
+PUSH_STR "Final count: "
+PRINT
+LOAD_VAR "counter"
+PRINT
+
+HALT
