@@ -4,7 +4,7 @@
 
 > „Ohne Kaffee keine Erleuchtung – auch nicht für Maschinen."
 
-TinyTotVM is a tiny, stack-based virtual machine written in Rust.
+TinyTotVM is a tiny virtual machine written in Rust with both stack-based and register-based execution modes.
 
 This repo is, in essence, a toy-box for my experiments in writing a VM. It's not expected to be used for production usage in anything. That said, if you want to play around with it, have at it. At some point I'll update my long-term goals for it and post them someplace here, at least so I remember them.
 
@@ -12,7 +12,8 @@ This repo is, in essence, a toy-box for my experiments in writing a VM. It's not
 
 TinyTotVM provides a **complete functional programming runtime** with advanced capabilities:
 
-- **Core Runtime**: Stack-based VM with dynamic typing, automatic memory management
+- **Hybrid Architecture**: Both stack-based and register-based execution modes with IR (Intermediate Representation)
+- **Core Runtime**: Dynamic typing, automatic memory management
 - **Data Types**: 64-bit integers, IEEE 754 floats, strings, booleans, dynamic lists, objects
 - **Functions**: First-class functions, closures with variable capture, higher-order programming
 - **Modules**: Import/export system with circular dependency detection
@@ -52,6 +53,9 @@ ttvm --gc mark-sweep --gc-stats examples/showcase.ttvm
 
 # With single-threaded mode (disable SMP)
 ttvm --no-smp examples/showcase.ttvm
+
+# With register-based IR execution
+ttvm --use-ir examples/showcase.ttvm
 ```
 
 ### Profiling and Tracing
@@ -151,6 +155,7 @@ OPTIONS:
   --run-tests          Run built-in unit tests
   --no-table           Use plain text output instead of formatted tables
   --no-smp             Disable SMP scheduler (use single-threaded mode)
+  --use-ir             Enable register-based IR execution mode
 
 COMMANDS:
   ttvm test-all                           # Run all example tests
@@ -174,6 +179,34 @@ COMMANDS:
 - **Embedded Scripting** - Lightweight runtime with full standard library
 - **Prototyping** - Rapid development of domain-specific languages
 - **Experimentation** - Runtime with comprehensive math, string, I/O operations
+
+## Execution Modes
+
+TinyTotVM supports two execution modes that can be selected at runtime:
+
+### Stack-Based Execution (Default)
+The traditional stack-based virtual machine that executes bytecode directly using a stack for operand storage. This mode provides:
+- Simple instruction semantics
+- Direct bytecode interpretation
+- Full compatibility with all TinyTotVM features including concurrency
+- Mature and stable implementation
+
+### Register-Based IR Execution (`--use-ir`)
+An advanced register-based execution mode using Intermediate Representation (IR). This mode provides:
+- **Stack-to-Register Translation**: Automatically converts stack-based bytecode to register-based IR
+- **Register Allocation**: Efficient register management with spill handling
+- **Optimized Execution**: Register-based operations for improved performance potential
+- **Research Platform**: Experimental mode for studying register-based VM architectures
+
+```bash
+# Use traditional stack-based execution (default)
+ttvm examples/program.ttvm
+
+# Use register-based IR execution
+ttvm --use-ir examples/program.ttvm
+```
+
+**Note**: The IR mode is experimental and currently supports basic arithmetic, control flow, and simple programs. Complex features like concurrency operations (SPAWN, SEND, RECEIVE) are not yet supported in IR mode.
 
 ## Architecture
 
@@ -217,6 +250,11 @@ TinyTotVM uses a clean, modular architecture organized into logical modules:
 ### Testing Framework (`src/testing/`)
 - **`harness.rs`** - Test execution framework
 - **`runner.rs`** - Test runner and result reporting
+
+### Intermediate Representation (`src/ir/`)
+- **`mod.rs`** - Core IR data structures and register allocation
+- **`lowering.rs`** - Stack-to-register translation pass
+- **`vm.rs`** - Register-based execution engine
 
 ### Command Line Interface (`src/cli/`)
 - **`args.rs`** - Command line argument parsing

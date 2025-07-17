@@ -1,13 +1,14 @@
-// TinyTotVM - A BEAM-style Virtual Machine Library
+// TinyTotVM - A Hybrid Virtual Machine Library
 // 
-// This library provides a stack-based virtual machine with BEAM-style concurrency,
-// garbage collection, and comprehensive profiling capabilities.
+// This library provides both stack-based and register-based virtual machine execution
+// modes with BEAM-style concurrency, garbage collection, and comprehensive profiling capabilities.
 
 pub mod vm;
 pub mod gc;
 pub mod profiling;
 pub mod concurrency;
 pub mod bytecode;
+pub mod ir;
 // pub mod testing;  // Temporarily disabled until VM is extracted
 
 // Re-export commonly used types for convenience
@@ -15,6 +16,7 @@ pub use vm::{Value, OpCode, VMError, VMResult, ProcId, MessagePattern};
 pub use gc::{GcEngine, GcStats, MarkSweepGc, NoGc};
 pub use profiling::Profiler;
 pub use concurrency::{Message, RestartStrategy, ChildType, Shutdown, ChildSpec, RestartPolicy, SupervisorSpec, ChildState, ProcessRegistry};
+pub use ir::{RegInstr, RegValue, RegBlock, RegId};
 // pub use testing::{TestResult, run_vm_tests, report_gc_stats};
 
 // Configuration types
@@ -38,6 +40,7 @@ pub struct VMConfig {
     pub smp_enabled: bool,
     pub trace_procs: bool,
     pub profile_procs: bool,
+    pub use_ir: bool,
 }
 
 impl Default for VMConfig {
@@ -55,6 +58,7 @@ impl Default for VMConfig {
             smp_enabled: true,
             trace_procs: false,
             profile_procs: false,
+            use_ir: false,
         }
     }
 }

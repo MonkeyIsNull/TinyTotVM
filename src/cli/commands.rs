@@ -343,8 +343,24 @@ fn execute_program_file(file: &str, args: &CliArgs) -> Result<(), Box<dyn std::e
         println!();
     }
 
-    // Use SMP scheduler if enabled, otherwise use regular VM
-    if config.smp_enabled {
+    // Check if IR execution is requested
+    if config.use_ir {
+        println!("Running with IR (Intermediate Representation) execution...");
+        
+        // Import IR modules
+        use crate::ir::lowering::StackToRegisterLowering;
+        use crate::ir::vm::RegisterVM;
+        
+        // Convert stack-based bytecode to register-based IR
+        let ir_block = StackToRegisterLowering::lower(&program)?;
+        
+        // Execute using register-based IR VM
+        let mut ir_vm = RegisterVM::new(ir_block);
+        ir_vm.run()?;
+        
+        println!("IR execution completed successfully");
+    } else if config.smp_enabled {
+        // Use SMP scheduler if enabled
         println!("Running with BEAM-style SMP scheduler...");
         println!("SMP enabled flag: {}", config.smp_enabled);
         println!("Debug: About to create SMP scheduler pool");
