@@ -618,11 +618,12 @@ pub struct RegisterVM {
 - **Educational Value**: Demonstrates register allocation and IR translation
 - **Architecture Comparison**: Direct comparison between stack and register execution
 
-### Current Limitations
-- **Concurrency Support**: IR mode doesn't support SPAWN, SEND, RECEIVE operations
-- **Complex Control Flow**: Some edge cases in jump translation
-- **Function Calls**: Limited support for function call semantics
-- **Exception Handling**: No support for try/catch in IR mode
+### Current Implementation Status
+- **Basic Operations**: Full support for arithmetic, logic, comparisons
+- **Variable Operations**: Complete STORE, LOAD, DELETE support
+- **Control Flow**: Jump and conditional operations (with some edge cases being refined)
+- **Concurrency Integration**: Automatic delegation to SMP scheduler for SPAWN, SEND, RECEIVE operations
+- **Future Work**: Direct IR execution of concurrency operations, function calls, exception handling
 
 ### Usage
 ```bash

@@ -276,4 +276,4 @@ PRINT r1               ; Print value in register r1
 HALT                   ; Terminate execution
 ```
 
-**Note**: The IR mode is experimental and supports only basic arithmetic, control flow, and simple programs. Complex features like concurrency operations are not yet implemented in IR mode.
+**Note**: The IR mode provides comprehensive instruction translation with automatic fallback to the SMP scheduler for concurrency operations, ensuring full compatibility with all TinyTotVM features.

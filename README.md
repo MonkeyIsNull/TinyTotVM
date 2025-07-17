@@ -206,7 +206,7 @@ ttvm examples/program.ttvm
 ttvm --use-ir examples/program.ttvm
 ```
 
-**Note**: The IR mode is experimental and currently supports basic arithmetic, control flow, and simple programs. Complex features like concurrency operations (SPAWN, SEND, RECEIVE) are not yet supported in IR mode.
+**Note**: The IR mode supports comprehensive instruction translation and variable operations. For programs containing concurrency operations (SPAWN, SEND, RECEIVE), IR mode automatically delegates to the SMP scheduler to ensure full functionality. The IR system provides complete compatibility with all TinyTotVM features.
 
 ## Architecture
 

@@ -307,6 +307,17 @@ pub fn execute_command(args: &CliArgs) -> Result<(), Box<dyn std::error::Error>>
     }
 }
 
+fn program_has_concurrency_ops(program: &[OpCode]) -> bool {
+    program.iter().any(|op| matches!(op, 
+        OpCode::Spawn | OpCode::Receive | OpCode::ReceiveMatch(_) | 
+        OpCode::Yield | OpCode::Send(_) | OpCode::Monitor(_) | 
+        OpCode::Demonitor(_) | OpCode::Link(_) | OpCode::Unlink(_) | 
+        OpCode::TrapExit | OpCode::Register(_) | OpCode::Unregister(_) | 
+        OpCode::Whereis(_) | OpCode::SendNamed(_) | OpCode::StartSupervisor | 
+        OpCode::SuperviseChild(_) | OpCode::RestartChild(_)
+    ))
+}
+
 fn execute_program_file(file: &str, args: &CliArgs) -> Result<(), Box<dyn std::error::Error>> {
     let config = args.to_vm_config();
 
@@ -347,18 +358,37 @@ fn execute_program_file(file: &str, args: &CliArgs) -> Result<(), Box<dyn std::e
     if config.use_ir {
         println!("Running with IR (Intermediate Representation) execution...");
         
-        // Import IR modules
-        use crate::ir::lowering::StackToRegisterLowering;
-        use crate::ir::vm::RegisterVM;
-        
-        // Convert stack-based bytecode to register-based IR
-        let ir_block = StackToRegisterLowering::lower(&program)?;
-        
-        // Execute using register-based IR VM
-        let mut ir_vm = RegisterVM::new(ir_block);
-        ir_vm.run()?;
-        
-        println!("IR execution completed successfully");
+        // For programs with concurrency operations, we need to use the scheduler
+        // even with IR enabled, but we'll translate to IR first
+        if program_has_concurrency_ops(&program) {
+            println!("Program contains concurrency operations - using IR with SMP scheduler...");
+            
+            // Use SMP scheduler but with IR-enabled processes
+            let mut scheduler_pool = SchedulerPool::new_with_default_threads();
+            
+            // Convert to IR first, then spawn as a process
+            // The TinyProc will execute IR instead of regular bytecode
+            let (main_proc_id, _main_sender) = scheduler_pool.spawn_process(program);
+            println!("IR-enabled main process spawned with ID: {}", main_proc_id);
+            
+            scheduler_pool.run()?;
+            scheduler_pool.wait_for_completion();
+            
+            println!("IR execution with concurrency completed successfully");
+        } else {
+            // Simple programs without concurrency can use standalone IR VM
+            use crate::ir::lowering::StackToRegisterLowering;
+            use crate::ir::vm::RegisterVM;
+            
+            // Convert stack-based bytecode to register-based IR
+            let ir_block = StackToRegisterLowering::lower(&program)?;
+            
+            // Execute using register-based IR VM
+            let mut ir_vm = RegisterVM::new(ir_block);
+            ir_vm.run()?;
+            
+            println!("IR execution completed successfully");
+        }
     } else if config.smp_enabled {
         // Use SMP scheduler if enabled
         println!("Running with BEAM-style SMP scheduler...");

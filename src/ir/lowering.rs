@@ -304,7 +304,236 @@ impl StackToRegisterLowering {
                 self.block.add_instruction(RegInstr::Halt);
             }
             
-            // For unsupported instructions, add a NOP for now
+            // Boolean constants
+            OpCode::True => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::True(dst));
+                self.stack.push(dst);
+            }
+            
+            OpCode::False => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::False(dst));
+                self.stack.push(dst);
+            }
+            
+            OpCode::Null => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Null(dst));
+                self.stack.push(dst);
+            }
+            
+            // Object operations
+            OpCode::SetField(field_name) => {
+                let value = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("SET_FIELD".to_string()))?;
+                let object = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("SET_FIELD".to_string()))?;
+                self.block.add_instruction(RegInstr::SetField(object, field_name.clone(), value));
+            }
+            
+            OpCode::GetField(field_name) => {
+                let object = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("GET_FIELD".to_string()))?;
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::GetField(dst, object, field_name.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::HasField(field_name) => {
+                let object = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("HAS_FIELD".to_string()))?;
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::HasField(dst, object, field_name.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::DeleteField(field_name) => {
+                let object = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("DELETE_FIELD".to_string()))?;
+                self.block.add_instruction(RegInstr::DeleteField(object, field_name.clone()));
+            }
+            
+            OpCode::Keys => {
+                let object = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("KEYS".to_string()))?;
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Keys(dst, object));
+                self.stack.push(dst);
+            }
+            
+            // Variable operations
+            OpCode::Store(var_name) => {
+                let value = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("STORE".to_string()))?;
+                self.block.add_instruction(RegInstr::Store(var_name.clone(), value));
+            }
+            
+            OpCode::Load(var_name) => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Load(dst, var_name.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::Delete(var_name) => {
+                self.block.add_instruction(RegInstr::Delete(var_name.clone()));
+            }
+            
+            // Function operations
+            OpCode::MakeFunction { addr, params } => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::MakeFunction(dst, *addr, params.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::CallFunction => {
+                let func_reg = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("CALL_FUNCTION".to_string()))?;
+                // For now, assume no arguments - this would need more sophisticated handling
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::CallFunction(Some(dst), func_reg, vec![]));
+                self.stack.push(dst);
+            }
+            
+            OpCode::MakeLambda { addr, params } => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::MakeLambda(dst, *addr, params.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::Capture(var_name) => {
+                let value = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("CAPTURE".to_string()))?;
+                self.block.add_instruction(RegInstr::Capture(var_name.clone(), value));
+            }
+            
+            // Exception handling
+            OpCode::Try { catch_addr } => {
+                self.block.add_instruction(RegInstr::Try(*catch_addr));
+            }
+            
+            OpCode::Catch => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Catch(dst));
+                self.stack.push(dst);
+            }
+            
+            OpCode::Throw => {
+                let exception = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("THROW".to_string()))?;
+                self.block.add_instruction(RegInstr::Throw(exception));
+            }
+            
+            OpCode::EndTry => {
+                self.block.add_instruction(RegInstr::EndTry);
+            }
+            
+            // Module system
+            OpCode::Import(module_path) => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Import(dst, module_path.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::Export(name) => {
+                let value = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("EXPORT".to_string()))?;
+                self.block.add_instruction(RegInstr::Export(name.clone(), value));
+            }
+            
+            // Concurrency operations - the key ones we need to support!
+            OpCode::Spawn => {
+                let function = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("SPAWN".to_string()))?;
+                let dst_pid = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Spawn(dst_pid, function));
+                self.stack.push(dst_pid);
+            }
+            
+            OpCode::Receive => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Receive(dst));
+                self.stack.push(dst);
+            }
+            
+            OpCode::ReceiveMatch(patterns) => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::ReceiveMatch(dst, patterns.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::Yield => {
+                self.block.add_instruction(RegInstr::Yield);
+            }
+            
+            OpCode::Send(target_pid) => {
+                let message = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("SEND".to_string()))?;
+                let pid_reg = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Mov(pid_reg, RegValue::Const(crate::vm::Value::Int(*target_pid as i64))));
+                self.block.add_instruction(RegInstr::Send(pid_reg, message));
+            }
+            
+            OpCode::Monitor(target_pid) => {
+                let dst_ref = self.block.alloc_register();
+                let pid_reg = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Mov(pid_reg, RegValue::Const(crate::vm::Value::Int(*target_pid as i64))));
+                self.block.add_instruction(RegInstr::Monitor(dst_ref, pid_reg));
+                self.stack.push(dst_ref);
+            }
+            
+            OpCode::Demonitor(monitor_ref) => {
+                let ref_reg = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Mov(ref_reg, RegValue::Const(crate::vm::Value::Str(monitor_ref.clone()))));
+                self.block.add_instruction(RegInstr::Demonitor(ref_reg));
+            }
+            
+            OpCode::Link(target_pid) => {
+                let pid_reg = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Mov(pid_reg, RegValue::Const(crate::vm::Value::Int(*target_pid as i64))));
+                self.block.add_instruction(RegInstr::Link(pid_reg));
+            }
+            
+            OpCode::Unlink(target_pid) => {
+                let pid_reg = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Mov(pid_reg, RegValue::Const(crate::vm::Value::Int(*target_pid as i64))));
+                self.block.add_instruction(RegInstr::Unlink(pid_reg));
+            }
+            
+            OpCode::TrapExit => {
+                let enable_flag = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("TRAP_EXIT".to_string()))?;
+                self.block.add_instruction(RegInstr::TrapExit(enable_flag));
+            }
+            
+            // Process registry operations
+            OpCode::Register(name) => {
+                let pid = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("REGISTER".to_string()))?;
+                self.block.add_instruction(RegInstr::Register(name.clone(), pid));
+            }
+            
+            OpCode::Unregister(name) => {
+                self.block.add_instruction(RegInstr::Unregister(name.clone()));
+            }
+            
+            OpCode::Whereis(name) => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Whereis(dst, name.clone()));
+                self.stack.push(dst);
+            }
+            
+            OpCode::SendNamed(name) => {
+                let message = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("SEND_NAMED".to_string()))?;
+                self.block.add_instruction(RegInstr::SendNamed(name.clone(), message));
+            }
+            
+            // Add basic I/O operations
+            OpCode::ReadFile => {
+                let filename = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("READ_file".to_string()))?;
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::ReadFile(dst, filename));
+                self.stack.push(dst);
+            }
+            
+            OpCode::WriteFile => {
+                let content = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("write_file".to_string()))?;
+                let filename = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("write_file".to_string()))?;
+                self.block.add_instruction(RegInstr::WriteFile(filename, content));
+            }
+            
+            OpCode::DumpScope => {
+                let dst = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::DumpScope(dst));
+                self.stack.push(dst);
+            }
+            
+            // For any remaining unsupported instructions, add a NOP 
             _ => {
                 self.block.add_instruction(RegInstr::Nop);
             }

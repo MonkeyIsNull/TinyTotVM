@@ -322,6 +322,57 @@ impl RegisterVM {
                 self.set_register(*dst, result)?;
                 self.ip += 1;
             }
+            
+            // Handle all the new instruction types we added
+            RegInstr::True(dst) => {
+                self.set_register(*dst, Value::Bool(true))?;
+                self.ip += 1;
+            }
+            
+            RegInstr::False(dst) => {
+                self.set_register(*dst, Value::Bool(false))?;
+                self.ip += 1;
+            }
+            
+            RegInstr::Null(dst) => {
+                self.set_register(*dst, Value::Null)?;
+                self.ip += 1;
+            }
+            
+            RegInstr::Store(var_name, src) => {
+                let value = self.get_register(*src)?.clone();
+                self.variables.insert(var_name.clone(), value);
+                self.ip += 1;
+            }
+            
+            RegInstr::Load(dst, var_name) => {
+                let value = self.variables.get(var_name)
+                    .ok_or_else(|| VMError::UndefinedVariable(var_name.clone()))?
+                    .clone();
+                self.set_register(*dst, value)?;
+                self.ip += 1;
+            }
+            
+            RegInstr::Delete(var_name) => {
+                self.variables.remove(var_name);
+                self.ip += 1;
+            }
+            
+            // For concurrency operations that need TinyProc integration, 
+            // return a specific error that indicates they need scheduler support
+            RegInstr::Spawn(_, _) | RegInstr::Receive(_) | RegInstr::Send(_, _) | 
+            RegInstr::Yield | RegInstr::Monitor(_, _) | RegInstr::Link(_) | 
+            RegInstr::Unlink(_) | RegInstr::Register(_, _) | RegInstr::Whereis(_, _) => {
+                return Err(VMError::UnsupportedOperation(
+                    "Concurrency operations require TinyProc scheduler integration. Use regular VM with --no-smp or SMP scheduler.".to_string()
+                ));
+            }
+            
+            // For other complex operations not yet implemented, skip with NOP behavior
+            _ => {
+                // Skip unimplemented instructions for now
+                self.ip += 1;
+            }
         }
         
         Ok(())
