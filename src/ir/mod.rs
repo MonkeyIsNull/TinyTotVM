@@ -15,6 +15,7 @@ pub enum RegValue {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Many variants are for future extensibility
 pub enum RegInstr {
     // Data movement
     Mov(RegId, RegValue),
@@ -216,15 +217,6 @@ impl RegBlock {
         self.instructions.push(instr);
     }
     
-    pub fn get_or_alloc_var(&mut self, var_name: &str) -> RegId {
-        if let Some(&reg) = self.variables.get(var_name) {
-            reg
-        } else {
-            let reg = self.alloc_register();
-            self.variables.insert(var_name.to_string(), reg);
-            reg
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -252,11 +244,4 @@ impl StackState {
         self.stack.last().copied()
     }
     
-    pub fn depth(&self) -> usize {
-        self.stack.len()
-    }
-    
-    pub fn is_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
 }

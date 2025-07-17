@@ -29,6 +29,18 @@ pub trait NameRegistry: Send + Sync + std::fmt::Debug {
     fn send_to_named(&self, name: &str, message: Message) -> Result<(), String>;
 }
 
+// Trait for runnable processes (both TinyProc and IRProc)
+pub trait RunnableProcess: Send + Sync + std::fmt::Debug {
+    fn get_id(&self) -> ProcId;
+    fn get_state(&self) -> ProcState;
+    fn set_state(&mut self, state: ProcState);
+    fn run_until_yield(&mut self) -> VMResult<ProcState>;
+    fn has_messages(&self) -> bool;
+    fn send_message(&self, message: Message) -> Result<(), String>;
+    fn is_waiting_for_message(&self) -> bool;
+    fn set_waiting_for_message(&mut self, waiting: bool);
+}
+
 #[derive(Debug)]
 pub struct TinyProc {
     pub id: ProcId,
@@ -1149,5 +1161,40 @@ impl TinyProc {
         
         // Return the module's exports
         Ok(module_proc.exports)
+    }
+}
+
+impl RunnableProcess for TinyProc {
+    fn get_id(&self) -> ProcId {
+        self.id
+    }
+    
+    fn get_state(&self) -> ProcState {
+        self.state
+    }
+    
+    fn set_state(&mut self, state: ProcState) {
+        self.state = state;
+    }
+    
+    fn run_until_yield(&mut self) -> VMResult<ProcState> {
+        TinyProc::run_until_yield(self)
+    }
+    
+    fn has_messages(&self) -> bool {
+        TinyProc::has_messages(self)
+    }
+    
+    fn send_message(&self, message: Message) -> Result<(), String> {
+        TinyProc::send_message(self, message)
+            .map_err(|e| format!("Failed to send message: {}", e))
+    }
+    
+    fn is_waiting_for_message(&self) -> bool {
+        self.waiting_for_message
+    }
+    
+    fn set_waiting_for_message(&mut self, waiting: bool) {
+        self.waiting_for_message = waiting;
     }
 }

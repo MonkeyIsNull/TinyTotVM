@@ -57,7 +57,7 @@ impl StackToRegisterLowering {
         Ok(())
     }
     
-    fn translate_instruction(&mut self, addr: usize, instruction: &OpCode) -> VMResult<()> {
+    fn translate_instruction(&mut self, _addr: usize, instruction: &OpCode) -> VMResult<()> {
         match instruction {
             // Push operations - allocate register and load constant
             OpCode::PushInt(n) => {
@@ -304,24 +304,6 @@ impl StackToRegisterLowering {
                 self.block.add_instruction(RegInstr::Halt);
             }
             
-            // Boolean constants
-            OpCode::True => {
-                let dst = self.block.alloc_register();
-                self.block.add_instruction(RegInstr::True(dst));
-                self.stack.push(dst);
-            }
-            
-            OpCode::False => {
-                let dst = self.block.alloc_register();
-                self.block.add_instruction(RegInstr::False(dst));
-                self.stack.push(dst);
-            }
-            
-            OpCode::Null => {
-                let dst = self.block.alloc_register();
-                self.block.add_instruction(RegInstr::Null(dst));
-                self.stack.push(dst);
-            }
             
             // Object operations
             OpCode::SetField(field_name) => {
@@ -356,17 +338,6 @@ impl StackToRegisterLowering {
                 self.stack.push(dst);
             }
             
-            // Variable operations
-            OpCode::Store(var_name) => {
-                let value = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("STORE".to_string()))?;
-                self.block.add_instruction(RegInstr::Store(var_name.clone(), value));
-            }
-            
-            OpCode::Load(var_name) => {
-                let dst = self.block.alloc_register();
-                self.block.add_instruction(RegInstr::Load(dst, var_name.clone()));
-                self.stack.push(dst);
-            }
             
             OpCode::Delete(var_name) => {
                 self.block.add_instruction(RegInstr::Delete(var_name.clone()));
@@ -494,8 +465,10 @@ impl StackToRegisterLowering {
             
             // Process registry operations
             OpCode::Register(name) => {
-                let pid = self.stack.pop().ok_or_else(|| VMError::StackUnderflow("REGISTER".to_string()))?;
-                self.block.add_instruction(RegInstr::Register(name.clone(), pid));
+                // Register current process - no PID needed on stack (use current process ID)
+                // Use a placeholder register for the process ID (will be filled by IR VM)
+                let proc_id_reg = self.block.alloc_register();
+                self.block.add_instruction(RegInstr::Register(name.clone(), proc_id_reg));
             }
             
             OpCode::Unregister(name) => {

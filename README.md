@@ -122,6 +122,7 @@ For detailed information, see:
 - **[Examples Guide](docs/EXAMPLES.md)** - Complete walkthrough of example programs
 - **[Architecture Documentation](docs/ARCHITECTURE.md)** - VM design and implementation details
 - **[BEAM-Style Concurrency Guide](docs/CONCURRENCY.md)** - Complete SMP scheduler, process isolation, and fault tolerance
+- **[IR Architecture Guide](docs/IR_ARCHITECTURE.md)** - Register-based execution, concurrency compilation, and research platform
 
 ## Example Programs
 
@@ -194,9 +195,10 @@ The traditional stack-based virtual machine that executes bytecode directly usin
 ### Register-Based IR Execution (`--use-ir`)
 An advanced register-based execution mode using Intermediate Representation (IR). This mode provides:
 - **Stack-to-Register Translation**: Automatically converts stack-based bytecode to register-based IR
-- **Register Allocation**: Efficient register management with spill handling
-- **Optimized Execution**: Register-based operations for improved performance potential
+- **Register Allocation**: Efficient register management with virtual stack simulation
+- **Concurrency Compilation**: Proves that concurrency operations can be compiled to register form
 - **Research Platform**: Experimental mode for studying register-based VM architectures
+- **Hybrid Execution**: IR translation with proven TinyProc execution for full functionality
 
 ```bash
 # Use traditional stack-based execution (default)
@@ -206,7 +208,7 @@ ttvm examples/program.ttvm
 ttvm --use-ir examples/program.ttvm
 ```
 
-**Note**: The IR mode supports comprehensive instruction translation and variable operations. For programs containing concurrency operations (SPAWN, SEND, RECEIVE), IR mode automatically delegates to the SMP scheduler to ensure full functionality. The IR system provides complete compatibility with all TinyTotVM features.
+**Note**: The IR mode supports comprehensive instruction translation including full concurrency operations. Programs containing concurrency operations (SPAWN, SEND, RECEIVE, YIELD) are successfully translated to register-based IR form, demonstrating that these operations can be compiled to register mode. For execution, concurrent programs currently use the proven TinyProc scheduler system to ensure full functionality, while the IR translation demonstrates the feasibility of register-based concurrency compilation.
 
 ## Architecture
 
@@ -226,12 +228,12 @@ TinyTotVM uses a clean, modular architecture organized into logical modules:
 - **`errors.rs`** - VM error types and handling
 
 ### Concurrency System (`src/concurrency/`)
-- **`pool.rs`** - SMP scheduler pool and work-stealing
-- **`process.rs`** - Process isolation and actor model
-- **`scheduler.rs`** - Individual scheduler threads
-- **`registry.rs`** - Process registry and name resolution
-- **`supervisor.rs`** - Supervision trees and fault tolerance
-- **`messages.rs`** - Inter-process message types
+- **`pool.rs`** - SMP scheduler pool and work-stealing scheduler
+- **`process.rs`** - Process isolation and actor model implementation
+- **`scheduler.rs`** - Individual scheduler threads and process execution
+- **`registry.rs`** - Process registry and name resolution system
+- **`supervisor.rs`** - Supervision trees and fault tolerance mechanisms
+- **`messages.rs`** - Inter-process message types and communication
 
 ### Garbage Collection (`src/gc/`)
 - **`mark_sweep.rs`** - Mark-and-sweep garbage collector
@@ -252,9 +254,9 @@ TinyTotVM uses a clean, modular architecture organized into logical modules:
 - **`runner.rs`** - Test runner and result reporting
 
 ### Intermediate Representation (`src/ir/`)
-- **`mod.rs`** - Core IR data structures and register allocation
-- **`lowering.rs`** - Stack-to-register translation pass
-- **`vm.rs`** - Register-based execution engine
+- **`mod.rs`** - Core IR data structures, register allocation, and virtual stack simulation
+- **`lowering.rs`** - Stack-to-register translation pass with full instruction coverage
+- **`vm.rs`** - Register-based execution engine for IR instruction interpretation
 
 ### Command Line Interface (`src/cli/`)
 - **`args.rs`** - Command line argument parsing
